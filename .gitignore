@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Logs
+log/*
+!log/.gitkeep
+tasks/*/task.log
+
+# Task data (user-specific)
+tasks/*
+!tasks/.gitkeep
+
+# Editor/IDE
+.ruby-lsp/
+
+# Local development settings
+.claude/settings.local.json

@@ -1,0 +1,223 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative '../thaings'
+require 'open3'
+require 'cgi'
+
+# Load .env file
+env_file = File.join(THAINGS_ROOT, '.env')
+if File.exist?(env_file)
+  File.readlines(env_file).each do |line|
+    line = line.strip
+    next if line.empty? || line.start_with?('#')
+    key, value = line.split('=', 2)
+    ENV[key] = value if key && value
+  end
+end
+
+DAEMON_LOG = File.join(THAINGS_ROOT, 'log', 'daemon.log')
+
+# Finds processable tasks
+class FindsProcessableTasks
+  def call
+    return [] unless Dir.exist?(THAINGS_TASKS_DIR)
+
+    all_tasks
+      .select(&:processable?)
+      .sort_by { |t| t.received_at || '' }
+  end
+
+  private
+
+  def all_tasks
+    Dir.glob(File.join(THAINGS_TASKS_DIR, '*', 'task.json')).map do |path|
+      Task.find(File.basename(File.dirname(path)))
+    end.compact
+  end
+end
+
+# Builds a prompt from task properties
+class BuildsPrompt
+  def initialize(task)
+    @task = task
+  end
+
+  def call
+    parts = []
+    parts << @task.title if @task.title
+    parts << "\n\n#{@task.notes}" unless @task.notes.empty?
+    parts << "\n\nChecklist:\n#{@task.checklist}" if checklist_present?
+    parts.join
+  end
+
+  private
+
+  def checklist_present?
+    @task.checklist.is_a?(String) && !@task.checklist.empty?
+  end
+end
+
+# Asks Claude to respond to a prompt
+class AsksClaude
+  Response = Struct.new(:status, :text)
+
+  def initialize(task_dir)
+    @task_dir = task_dir
+  end
+
+  def call(prompt)
+    ensure_config_symlink!
+    stdout, stderr, process = run(prompt)
+
+    if process.success?
+      parse_response(stdout)
+    else
+      Response.new('blocked', "Blocked: Claude execution failed.\n#{stderr}")
+    end
+  end
+
+  private
+
+  def run(prompt)
+    stdout, stderr, status = Open3.capture3(
+      '/opt/homebrew/bin/claude', '--continue', '--print', '-p', prompt,
+      chdir: @task_dir
+    )
+    [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
+  end
+
+  def parse_response(output)
+    first_line = output.lines.first&.strip || ''
+
+    if first_line.start_with?('Done:')
+      Response.new('success', output)
+    elsif first_line.start_with?('Blocked:')
+      Response.new('blocked', output)
+    else
+      Response.new('blocked', "Blocked: No clear status prefix.\n\n#{output}")
+    end
+  end
+
+  def ensure_config_symlink!
+    ensure_symlink(
+      File.join(@task_dir, '.claude'),
+      File.join(THAINGS_TASK_ENV_BOILERPLATE_DIR, '.claude')
+    )
+    ensure_symlink(
+      File.join(@task_dir, 'CLAUDE.md'),
+      File.join(THAINGS_TASK_ENV_BOILERPLATE_DIR, 'CLAUDE.md')
+    )
+  end
+
+  def ensure_symlink(link, target)
+    return if File.symlink?(link) && File.readlink(link) == target
+
+    FileUtils.rm_f(link)
+    FileUtils.ln_s(target, link)
+  end
+end
+
+# Updates Things app via URL scheme
+class UpdatesThings
+  def append_note(id, text)
+    timestamp = Time.now.strftime('%Y-%m-%d %H:%M')
+    note = "\n---\n[#{timestamp}]\n#{text}"
+
+    open_url(id, 'append-notes' => note)
+  end
+
+  def set_tags(id, tags)
+    open_url(id, 'tags' => tags.join(','))
+  end
+
+  private
+
+  def open_url(id, params)
+    query = params.merge('id' => id, 'auth-token' => auth_token)
+      .map { |k, v| "#{k}=#{CGI.escape(v).gsub('+', '%20')}" }
+      .join('&')
+
+    system('open', '-g', "things:///update?#{query}")
+  end
+
+  def auth_token
+    ENV.fetch('THINGS_AUTH_TOKEN') { raise 'Missing THINGS_AUTH_TOKEN in ~/.thaings/.env' }
+  end
+end
+
+# Processes a single task through Claude
+class ProcessesTask
+  def initialize(task, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
+    @task = task
+    @things = things
+    @daemon_log = daemon_log
+    @task_log = Log.new(task.log_file)
+  end
+
+  def call
+    start_processing
+    response = ask_claude
+    finish_processing(response)
+  end
+
+  private
+
+  def start_processing
+    @task.mark_working!
+    @task.save!
+    update_things_status('working')
+
+    @daemon_log.write('start', "#{@task.id} - processing")
+    @task_log.write('daemon', 'Started processing')
+  end
+
+  def ask_claude
+    prompt = BuildsPrompt.new(@task).call
+    @task_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
+
+    AsksClaude.new(@task.dir).call(prompt)
+  end
+
+  def finish_processing(response)
+    @task.mark_finished!(response.status, response.text)
+    @task.save!
+
+    @things.append_note(@task.id, response.text)
+    update_things_status(response.status)
+
+    @task_log.write('daemon', "Completed: #{response.status}")
+    @daemon_log.write('done', "#{@task.id} - #{response.status}")
+  end
+
+  def update_things_status(status)
+    tags = @task.non_status_tags + [status]
+    @things.set_tags(@task.id, tags)
+  end
+end
+
+# Entry point: wakes, finds processable tasks, processes them
+class RespondsToThingsToDo
+  def initialize(log: Log.new(DAEMON_LOG))
+    @log = log
+  end
+
+  def call
+    @log.write('wake', 'Daemon triggered')
+
+    tasks = FindsProcessableTasks.new.call
+
+    if tasks.empty?
+      @log.write('idle', 'No tasks to process')
+      return
+    end
+
+    @log.write('found', "#{tasks.length} task(s) to process")
+
+    tasks.each { |task| ProcessesTask.new(task).call }
+
+    @log.write('exit', 'Daemon finished')
+  end
+end
+
+RespondsToThingsToDo.new.call

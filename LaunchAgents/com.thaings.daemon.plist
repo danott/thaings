@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.thaings.daemon</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/danott/.thaings/bin/responds-to-things-to-dos</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/danott/.thaings/tasks</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/danott/.thaings/log/daemon.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/danott/.thaings/log/daemon.stderr.log</string>
+</dict>
+</plist>
