@@ -21,20 +21,18 @@ DAEMON_LOG = THAINGS_ROOT / 'log' / 'daemon.log'
 
 # Finds processable to-dos
 class FindsProcessableToDos
-  def call
-    return [] unless THAINGS_TO_DOS_DIR.exist?
+  attr_reader :store
 
-    all_to_dos
-      .select(&:processable?)
-      .sort_by { |t| t.received_at || '' }
+  def initialize(store: ToDoStore.new)
+    @store = store
   end
 
-  private
-
-  def all_to_dos
-    THAINGS_TO_DOS_DIR.glob('*/to-do.json').map do |path|
-      ToDo.find(path.dirname.basename.to_s)
-    end.compact
+  def call
+    store.all_ids
+      .map { |id| store.find(id) }
+      .compact
+      .select(&:processable?)
+      .sort_by { |t| t.received_at || '' }
   end
 end
 
@@ -111,7 +109,14 @@ class AsksClaude
 end
 
 # Updates Things app via URL scheme
+#
+# Knows about Things-specific concepts like tags for workflow states.
+#
 class UpdatesThings
+  TAG_WORKING = 'Working'
+  TAG_READY = 'Ready'
+  THAINGS_TAGS = [TAG_WORKING, TAG_READY].freeze
+
   class UpdateFailed < StandardError; end
 
   def append_note(id, text)
@@ -120,11 +125,24 @@ class UpdatesThings
     open_url(id, 'append-notes' => note)
   end
 
-  def set_tags(id, tags)
-    open_url(id, 'tags' => tags.join(','))
+  def set_working_tag(id, current_tags)
+    set_workflow_tag(id, current_tags, TAG_WORKING)
+  end
+
+  def set_ready_tag(id, current_tags)
+    set_workflow_tag(id, current_tags, TAG_READY)
   end
 
   private
+
+  def set_workflow_tag(id, current_tags, new_tag)
+    tags = without_thaings_tags(current_tags) + [new_tag]
+    open_url(id, 'tags' => tags.join(','))
+  end
+
+  def without_thaings_tags(tags)
+    tags.reject { |t| THAINGS_TAGS.include?(t) }
+  end
 
   def open_url(id, params)
     query = params.merge('id' => id, 'auth-token' => auth_token)
@@ -166,16 +184,17 @@ class LocksToDoForProcessing
   private
 
   def lock_path
-    File.join(to_do.dir, '.lock')
+    to_do.dir / '.lock'
   end
 end
 
 # Processes a single to-do through Claude
 class ProcessesToDo
-  attr_reader :to_do, :things, :daemon_log, :to_do_log
+  attr_reader :to_do, :store, :things, :daemon_log, :to_do_log
 
-  def initialize(to_do, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
+  def initialize(to_do, store: ToDoStore.new, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
     @to_do = to_do
+    @store = store
     @things = things
     @daemon_log = daemon_log
     @to_do_log = Log.new(to_do.log_file)
@@ -183,25 +202,27 @@ class ProcessesToDo
 
   def call
     LocksToDoForProcessing.new(to_do).call do
-      start_processing
-      response = ask_claude
-      finish_processing(response)
+      working_to_do = start_processing
+      response = ask_claude(working_to_do)
+      finish_processing(working_to_do, response)
     end || daemon_log.write('skip', "#{to_do.id} - already locked")
   end
 
   private
 
   def start_processing
-    to_do.mark_working!
-    to_do.save!
-    set_thaings_tag(ToDoState::TAG_PENDING)
+    working_to_do = store.mark_working(to_do)
+    store.save(working_to_do)
+    things.set_working_tag(to_do.id, to_do.tags)
 
     daemon_log.write('start', "#{to_do.id} - processing")
     to_do_log.write('daemon', 'Started processing')
+
+    working_to_do
   end
 
-  def ask_claude
-    prompt = BuildsPrompt.new(to_do).call
+  def ask_claude(current_to_do)
+    prompt = BuildsPrompt.new(current_to_do).call
 
     if prompt.strip.empty?
       to_do_log.write('daemon', 'Skipped: no content to process')
@@ -209,23 +230,18 @@ class ProcessesToDo
     end
 
     to_do_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-    AsksClaude.new(to_do.dir).call(prompt)
+    AsksClaude.new(current_to_do.dir).call(prompt)
   end
 
-  def finish_processing(response)
-    to_do.mark_review!
-    to_do.save!
+  def finish_processing(working_to_do, response)
+    review_to_do = store.mark_review(working_to_do)
+    store.save(review_to_do)
 
     things.append_note(to_do.id, response)
-    set_thaings_tag(ToDoState::TAG_REVIEW)
+    things.set_ready_tag(to_do.id, to_do.tags)
 
     to_do_log.write('daemon', 'Completed')
     daemon_log.write('done', "#{to_do.id}")
-  end
-
-  def set_thaings_tag(thaings_tag)
-    tags = to_do.non_thaings_tags + [thaings_tag]
-    things.set_tags(to_do.id, tags)
   end
 end
 

@@ -41,7 +41,7 @@ class Log
   end
 end
 
-# A to-do's lifecycle state
+# A to-do's lifecycle state (immutable value object)
 #
 # States: pending, working, review
 #
@@ -50,20 +50,25 @@ end
 #   working              → review  (Claude responded)
 #   review + new_props   → working (user continues conversation)
 #
-# Tags in Things:
-#   Working → pending/working (agent's turn)
-#   Ready   → review (human's turn)
-#
 class ToDoState
-  TAG_PENDING = 'Working'
-  TAG_REVIEW = 'Ready'
-  THAINGS_TAGS = [TAG_PENDING, TAG_REVIEW].freeze
-
-  attr_reader :status, :props_processed
+  attr_reader :status, :received_at, :started_at, :completed_at, :props_processed
 
   def initialize(data)
     @status = data['status']
+    @received_at = data['received_at']
+    @started_at = data['started_at']
+    @completed_at = data['completed_at']
     @props_processed = data['props_processed'] || 0
+  end
+
+  def with(status: nil, started_at: nil, completed_at: nil, props_processed: nil)
+    ToDoState.new(
+      'status' => status || self.status,
+      'received_at' => received_at,
+      'started_at' => started_at || self.started_at,
+      'completed_at' => completed_at || self.completed_at,
+      'props_processed' => props_processed || self.props_processed
+    )
   end
 
   def processable?(props_count)
@@ -118,54 +123,18 @@ class ValidatesId
   end
 end
 
-# Domain object for a to-do from Things
+# Simple data object for a to-do
 #
-# Usage:
-#   to_do = ToDo.find_or_create('abc123')
-#   to_do.append_props(data_from_things)
-#   to_do.save!
+# Just holds data. Use ToDoStore for persistence.
 #
 class ToDo
-  attr_reader :id, :dir, :state, :data
+  attr_reader :id, :dir, :state, :props
 
-  def self.find(id)
-    ValidatesId.new(id).call
-    dir = THAINGS_TO_DOS_DIR / id
-    path = dir / 'to-do.json'
-    return nil unless path.exist?
-
-    data = JSON.parse(path.read(encoding: 'UTF-8'))
-    new(id: id, dir: dir, data: data)
-  end
-
-  def self.find_or_create(id)
-    find(id) || create(id)
-  end
-
-  def self.create(id)
-    ValidatesId.new(id).call
-    dir = THAINGS_TO_DOS_DIR / id
-    dir.mkpath
-
-    data = {
-      'state' => {
-        'status' => 'pending',
-        'received_at' => Time.now.utc.iso8601,
-        'started_at' => nil,
-        'completed_at' => nil,
-        'props_processed' => 0
-      },
-      'props' => []
-    }
-
-    new(id: id, dir: dir, data: data)
-  end
-
-  def initialize(id:, dir:, data:)
+  def initialize(id:, dir:, state:, props:)
     @id = id
     @dir = dir
-    @data = data
-    @state = ToDoState.new(data['state'])
+    @state = state
+    @props = props
   end
 
   # --- Queries ---
@@ -179,7 +148,7 @@ class ToDo
   end
 
   def received_at
-    data.dig('state', 'received_at')
+    state.received_at
   end
 
   def latest_props
@@ -203,36 +172,6 @@ class ToDo
     tags_str.split(',').map(&:strip).reject(&:empty?)
   end
 
-  def non_thaings_tags
-    tags.reject { |t| ToDoState::THAINGS_TAGS.include?(t) }
-  end
-
-  # --- Commands ---
-
-  def append_props(data)
-    props << {
-      'received_at' => now,
-      'data' => data
-    }
-  end
-
-  def mark_working!
-    update_state('status' => 'working', 'started_at' => now)
-  end
-
-  def mark_review!
-    update_state(
-      'status' => 'review',
-      'completed_at' => now,
-      'props_processed' => props_count
-    )
-  end
-
-  def save!
-    json = JSON.pretty_generate(data)
-    File.write(to_do_file, json, encoding: 'UTF-8')
-  end
-
   # --- Paths ---
 
   def to_do_file
@@ -242,19 +181,127 @@ class ToDo
   def log_file
     dir / 'to-do.log'
   end
+end
+
+# Handles reading/writing to-dos to disk
+#
+# Usage:
+#   store = ToDoStore.new
+#   to_do = store.find_or_create('abc123')
+#   store.append_props(to_do, data)
+#   store.save(to_do)
+#
+class ToDoStore
+  attr_reader :root_dir
+
+  def initialize(root_dir: THAINGS_TO_DOS_DIR)
+    @root_dir = root_dir
+  end
+
+  def find(id)
+    ValidatesId.new(id).call
+    dir = root_dir / id
+    path = dir / 'to-do.json'
+    return nil unless path.exist?
+
+    data = JSON.parse(path.read(encoding: 'UTF-8'))
+    build_to_do(id, dir, data)
+  end
+
+  def find_or_create(id)
+    find(id) || create(id)
+  end
+
+  def create(id)
+    ValidatesId.new(id).call
+    dir = root_dir / id
+    dir.mkpath
+
+    data = empty_to_do_data
+    build_to_do(id, dir, data)
+  end
+
+  def all_ids
+    return [] unless root_dir.exist?
+
+    root_dir.glob('*/to-do.json').map do |path|
+      path.dirname.basename.to_s
+    end
+  end
+
+  def save(to_do)
+    data = to_hash(to_do)
+    json = JSON.pretty_generate(data)
+    File.write(to_do.to_do_file, json, encoding: 'UTF-8')
+  end
+
+  def append_props(to_do, new_data)
+    new_props = to_do.props + [{
+      'received_at' => Time.now.utc.iso8601,
+      'data' => new_data
+    }]
+
+    ToDo.new(
+      id: to_do.id,
+      dir: to_do.dir,
+      state: to_do.state,
+      props: new_props
+    )
+  end
+
+  def mark_working(to_do)
+    new_state = to_do.state.with(
+      status: 'working',
+      started_at: Time.now.utc.iso8601
+    )
+
+    ToDo.new(id: to_do.id, dir: to_do.dir, state: new_state, props: to_do.props)
+  end
+
+  def mark_review(to_do)
+    new_state = to_do.state.with(
+      status: 'review',
+      completed_at: Time.now.utc.iso8601,
+      props_processed: to_do.props_count
+    )
+
+    ToDo.new(id: to_do.id, dir: to_do.dir, state: new_state, props: to_do.props)
+  end
 
   private
 
-  def props
-    data['props'] ||= []
+  def build_to_do(id, dir, data)
+    ToDo.new(
+      id: id,
+      dir: dir,
+      state: ToDoState.new(data['state']),
+      props: data['props'] || []
+    )
   end
 
-  def update_state(updates)
-    data['state'].merge!(updates)
-    @state = ToDoState.new(data['state'])
+  def empty_to_do_data
+    {
+      'state' => {
+        'status' => 'pending',
+        'received_at' => Time.now.utc.iso8601,
+        'started_at' => nil,
+        'completed_at' => nil,
+        'props_processed' => 0
+      },
+      'props' => []
+    }
   end
 
-  def now
-    Time.now.utc.iso8601
+  def to_hash(to_do)
+    {
+      'state' => {
+        'status' => to_do.state.status,
+        'received_at' => to_do.state.received_at,
+        'started_at' => to_do.state.started_at,
+        'completed_at' => to_do.state.completed_at,
+        'props_processed' => to_do.state.props_processed
+      },
+      'props' => to_do.props
+    }
   end
 end

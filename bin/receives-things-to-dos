@@ -5,62 +5,81 @@ require_relative '../thaings'
 
 RECEIVE_LOG = THAINGS_ROOT / 'log' / 'receive.log'
 
-# Receives a Things to-do via stdin JSON, creates/updates to-do state
+# Parses and validates input from Things
 #
-# Usage (from Shortcuts):
-#   echo '{"Type":"To-Do","ID":"abc123","Title":"..."}' | receives-things-to-dos
+# Raises on invalid input instead of calling exit.
+# Let the caller decide how to handle errors.
 #
-class ReceivesThingsToDo
-  attr_reader :input, :log
+class ThingsInput
+  class InvalidInput < StandardError; end
 
-  def initialize(input, log: Log.new(RECEIVE_LOG))
-    @input = input
-    @log = log
-  end
+  attr_reader :raw_input
 
-  def call
-    return unless valid?
-
-    to_do = ToDo.find_or_create(id)
-    to_do.append_props(data)
-    to_do.save!
-
-    log.write('receive', "#{id} - #{title}")
-    Log.new(to_do.log_file).write('receive', 'Props received from Things')
-  end
-
-  private
-
-  def valid?
-    return false unless data['Type'] == 'To-Do'
-
-    if id.nil? || id.empty?
-      $stderr.puts 'Missing ID field'
-      exit 1
-    end
-
-    true
+  def initialize(raw_input)
+    @raw_input = raw_input
   end
 
   def data
     @data ||= parse_json
   end
 
-  def parse_json
-    JSON.parse(input)
-  rescue JSON::ParserError => e
-    $stderr.puts "Invalid JSON: #{e.message}"
-    exit 1
-  end
-
   def id
-    data['ID']
+    value = data['ID']
+    raise InvalidInput, 'Missing ID field' if value.nil? || value.empty?
+
+    value
   end
 
   def title
     data['Title'] || '(no title)'
   end
+
+  def to_do?
+    data['Type'] == 'To-Do'
+  end
+
+  private
+
+  def parse_json
+    JSON.parse(raw_input)
+  rescue JSON::ParserError => e
+    raise InvalidInput, "Invalid JSON: #{e.message}"
+  end
 end
 
-input = $stdin.read.force_encoding('UTF-8').strip
-ReceivesThingsToDo.new(input).call
+# Receives a Things to-do via stdin JSON, creates/updates to-do state
+#
+# Usage (from Shortcuts):
+#   echo '{"Type":"To-Do","ID":"abc123","Title":"..."}' | receives-things-to-dos
+#
+class ReceivesThingsToDo
+  attr_reader :input, :store, :log
+
+  def initialize(input, store: ToDoStore.new, log: Log.new(RECEIVE_LOG))
+    @input = input
+    @store = store
+    @log = log
+  end
+
+  def call
+    return unless input.to_do?
+
+    to_do = store.find_or_create(input.id)
+    to_do = store.append_props(to_do, input.data)
+    store.save(to_do)
+
+    log.write('receive', "#{input.id} - #{input.title}")
+    Log.new(to_do.log_file).write('receive', 'Props received from Things')
+  end
+end
+
+# --- Entry point ---
+
+begin
+  raw = $stdin.read.force_encoding('UTF-8').strip
+  input = ThingsInput.new(raw)
+  ReceivesThingsToDo.new(input).call
+rescue ThingsInput::InvalidInput => e
+  $stderr.puts e.message
+  exit 1
+end
