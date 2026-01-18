@@ -3,8 +3,6 @@
 
 require_relative '../thaings'
 
-RECEIVE_LOG = THAINGS_ROOT / 'log' / 'receive.log'
-
 # Parses and validates input from Things
 #
 # Raises on invalid input instead of calling exit.
@@ -55,7 +53,7 @@ end
 class ReceivesThingsToDo
   attr_reader :input, :store, :log
 
-  def initialize(input, store: ToDoStore.new, log: Log.new(RECEIVE_LOG))
+  def initialize(input, store: ToDoStore.new, log: Log.new(THAINGS_CONFIG.receive_log))
     @input = input
     @store = store
     @log = log

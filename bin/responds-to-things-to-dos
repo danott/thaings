@@ -6,18 +6,7 @@ require 'open3'
 require 'timeout'
 require 'uri'
 
-# Load .env file
-env_file = THAINGS_ROOT / '.env'
-if env_file.exist?
-  env_file.readlines.each do |line|
-    line = line.strip
-    next if line.empty? || line.start_with?('#')
-    key, value = line.split('=', 2)
-    ENV[key] = value if key && value
-  end
-end
-
-DAEMON_LOG = THAINGS_ROOT / 'log' / 'daemon.log'
+EnvLoader.new(THAINGS_CONFIG.env_file).load
 
 # Finds processable to-dos
 class FindsProcessableToDos
@@ -66,15 +55,15 @@ end
 # - Timeout: hard ceiling on wall-clock time (prevents hung processes)
 #
 class AsksClaude
-  INSTRUCTIONS_FILE = THAINGS_ROOT / 'to-do-instructions.txt'
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
   MAX_TURNS = 10 # Enough for moderate research; may need adjustment based on real-world usage
   TIMEOUT_SECONDS = 300 # 5 minutes
 
-  attr_reader :to_do_dir
+  attr_reader :to_do_dir, :instructions_file
 
-  def initialize(to_do_dir)
+  def initialize(to_do_dir, instructions_file: THAINGS_CONFIG.instructions_file)
     @to_do_dir = to_do_dir
+    @instructions_file = instructions_file
   end
 
   def call(prompt)
@@ -98,7 +87,7 @@ class AsksClaude
         '--continue',
         '--print',
         '--max-turns', MAX_TURNS.to_s,
-        '--append-system-prompt-file', INSTRUCTIONS_FILE.to_s,
+        '--append-system-prompt-file', instructions_file.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
         chdir: to_do_dir.to_s
@@ -257,7 +246,7 @@ end
 class ProcessesToDo
   attr_reader :to_do, :store, :things, :daemon_log
 
-  def initialize(to_do, store: ToDoStore.new, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
+  def initialize(to_do, store: ToDoStore.new, things: UpdatesThings.new, daemon_log: Log.new(THAINGS_CONFIG.daemon_log))
     @to_do = to_do
     @store = store
     @things = things
@@ -307,7 +296,7 @@ end
 class RespondsToThingsToDo
   attr_reader :log
 
-  def initialize(log: Log.new(DAEMON_LOG))
+  def initialize(log: Log.new(THAINGS_CONFIG.daemon_log))
     @log = log
   end
 

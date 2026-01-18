@@ -6,8 +6,64 @@ require 'fileutils'
 require 'logger'
 require 'pathname'
 
-THAINGS_ROOT = Pathname(Dir.home) / '.thaings'
-THAINGS_TO_DOS_DIR = THAINGS_ROOT / 'to-dos'
+# Encapsulates all thaings paths in one place
+#
+# Usage:
+#   config = ThaingsConfig.new  # uses ~/.thaings
+#   config = ThaingsConfig.new(root: '/tmp/test')  # for testing
+#
+#   config.to_dos_dir    # => Pathname
+#   config.log_dir       # => Pathname
+#   config.daemon_log    # => Pathname
+#
+class ThaingsConfig
+  attr_reader :root
+
+  def initialize(root: Pathname(Dir.home) / '.thaings')
+    @root = Pathname(root)
+  end
+
+  def to_dos_dir = root / 'to-dos'
+  def log_dir = root / 'log'
+  def daemon_log = log_dir / 'daemon.log'
+  def receive_log = log_dir / 'receive.log'
+  def env_file = root / '.env'
+  def instructions_file = root / 'to-do-instructions.txt'
+end
+
+# Loads environment variables from a file
+#
+# Usage:
+#   EnvLoader.new(config.env_file).load
+#
+class EnvLoader
+  attr_reader :path
+
+  def initialize(path)
+    @path = Pathname(path)
+  end
+
+  def load
+    return unless path.exist?
+
+    parse_lines.each { |key, value| ENV[key] = value }
+  end
+
+  private
+
+  def parse_lines
+    path.readlines
+      .map(&:strip)
+      .reject { |line| line.empty? || line.start_with?('#') }
+      .map { |line| line.split('=', 2) }
+      .select { |parts| parts.length == 2 }
+  end
+end
+
+# Default config - used by global constants for backward compatibility
+THAINGS_CONFIG = ThaingsConfig.new
+THAINGS_ROOT = THAINGS_CONFIG.root
+THAINGS_TO_DOS_DIR = THAINGS_CONFIG.to_dos_dir
 
 # Append-only log writer backed by stdlib Logger
 #
