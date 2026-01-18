@@ -99,16 +99,16 @@ def install
 
   # Load daemon
   puts "Loading daemon..."
-  system("ln", "-sf", PLIST_GENERATED, PLIST_DEST)
-  system("launchctl", "unload", PLIST_DEST, err: File::NULL)
-  system("launchctl", "load", PLIST_DEST)
+  warn "Warning: Failed to create symlink" unless system("ln", "-sf", PLIST_GENERATED, PLIST_DEST)
+  system("launchctl", "unload", PLIST_DEST, err: File::NULL) # May fail if not loaded, that's OK
+  warn "Warning: Failed to load LaunchAgent" unless system("launchctl", "load", PLIST_DEST)
   puts
 
   # Create to-do in Things
   puts "Creating setup checklist in Things..."
   json = JSON.generate(INSTALL_DATA)
   encoded = URI.encode_www_form_component(json)
-  system("open", "-g", "things:///json?data=#{encoded}")
+  warn "Warning: Failed to open Things" unless system("open", "-g", "things:///json?data=#{encoded}")
   puts
   puts "Visit your Things Inbox to finish setting up Thaings."
 end
