@@ -88,6 +88,35 @@ class ToDoState
   end
 end
 
+# Validates a to-do ID to prevent path traversal attacks
+#
+# Usage:
+#   ValidatesId.new(id).call  # => id (or raises)
+#
+class ValidatesId
+  PATTERN = /\A[A-Za-z0-9_-]+\z/
+
+  class Invalid < ArgumentError; end
+
+  attr_reader :id
+
+  def initialize(id)
+    @id = id
+  end
+
+  def call
+    raise Invalid, "Invalid to-do ID: #{id.inspect}" unless valid?
+
+    id
+  end
+
+  private
+
+  def valid?
+    id.is_a?(String) && id.match?(PATTERN)
+  end
+end
+
 # Domain object for a to-do from Things
 #
 # Usage:
@@ -96,20 +125,10 @@ end
 #   to_do.save!
 #
 class ToDo
-  ID_PATTERN = /\A[A-Za-z0-9_-]+\z/
-
-  class InvalidIdError < ArgumentError; end
-
   attr_reader :id, :dir, :state, :data
 
-  def self.validate_id!(id)
-    return if id.is_a?(String) && id.match?(ID_PATTERN)
-
-    raise InvalidIdError, "Invalid to-do ID: #{id.inspect}"
-  end
-
   def self.find(id)
-    validate_id!(id)
+    ValidatesId.new(id).call
     dir = File.join(THAINGS_TO_DOS_DIR, id)
     path = File.join(dir, 'to-do.json')
     return nil unless File.exist?(path)
@@ -123,7 +142,7 @@ class ToDo
   end
 
   def self.create(id)
-    validate_id!(id)
+    ValidatesId.new(id).call
     dir = File.join(THAINGS_TO_DOS_DIR, id)
     FileUtils.mkdir_p(dir)
 
