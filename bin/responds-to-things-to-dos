@@ -124,6 +124,34 @@ class UpdatesThings
   end
 end
 
+# Acquires an exclusive lock on a to-do for processing
+#
+# Usage:
+#   LocksToDoForProcessing.new(to_do).call { do_work }
+#   # => returns block result, or false if already locked
+#
+class LocksToDoForProcessing
+  attr_reader :to_do
+
+  def initialize(to_do)
+    @to_do = to_do
+  end
+
+  def call
+    File.open(lock_path, File::RDWR | File::CREAT) do |f|
+      return false unless f.flock(File::LOCK_EX | File::LOCK_NB)
+
+      yield
+    end
+  end
+
+  private
+
+  def lock_path
+    File.join(to_do.dir, '.lock')
+  end
+end
+
 # Processes a single to-do through Claude
 class ProcessesToDo
   attr_reader :to_do, :things, :daemon_log, :to_do_log
@@ -136,9 +164,11 @@ class ProcessesToDo
   end
 
   def call
-    start_processing
-    response = ask_claude
-    finish_processing(response)
+    LocksToDoForProcessing.new(to_do).call do
+      start_processing
+      response = ask_claude
+      finish_processing(response)
+    end || daemon_log.write('skip', "#{to_do.id} - already locked")
   end
 
   private
