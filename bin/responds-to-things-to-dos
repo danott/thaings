@@ -101,7 +101,7 @@ class AsksClaude
   def parse_response(output)
     first_line = output.lines.first&.strip || ''
 
-    if first_line.start_with?('Done:')
+    if first_line.start_with?('Success:')
       Response.new('success', output)
     elsif first_line.start_with?('Blocked:')
       Response.new('blocked', output)

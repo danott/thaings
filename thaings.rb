@@ -42,7 +42,7 @@ end
 #
 # Transitions:
 #   waiting              → working (picked up for processing)
-#   working              → success (Claude responded Done:)
+#   working              → success (Claude responded Success:)
 #   working              → blocked (Claude responded Blocked: or errored)
 #   success + new_props  → working (user continues conversation)
 #   blocked + new_props  → working (user provides info)
