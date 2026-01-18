@@ -20,22 +20,23 @@ THAINGS_TO_DOS_DIR = File.join(THAINGS_ROOT, 'to-dos')
 #   - Automatic file handle management
 #
 class Log
+  attr_reader :logger
   attr_reader :path
 
   def initialize(path)
     @path = path
     @logger = Logger.new(path)
-    @logger.formatter = method(:format_line)
+    logger.formatter = method(:format_line)
   end
 
   def write(tag, message)
-    @logger.info { "#{tag}] #{message}" }
+    logger.info { "[#{tag}] #{message}" }
   end
 
   private
 
   def format_line(_severity, time, _progname, msg)
-    "#{time.utc.iso8601} [#{msg}\n"
+    "#{time.utc.iso8601} #{msg}\n"
   end
 end
 
