@@ -40,3 +40,15 @@ The API endpoint returns 403. Need valid credentials.
 
 I'd be happy to help you research this topic! After looking into it,
 I found several interesting options that might work for your needs...
+
+## Side Effects
+
+When you create or modify external resources, end with a "Changes" line linking each one:
+
+Changes: [Created page](notion-url), [Updated task](asana-url)
+
+If no URL is available, describe how to verify:
+
+Changes: Sent message to #channel (check Slack)
+
+Never summarize vaguely. Be specific about what changed and where.
