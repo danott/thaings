@@ -60,10 +60,8 @@ class EnvLoader
   end
 end
 
-# Default config - used by global constants for backward compatibility
+# Default config instance
 THAINGS_CONFIG = ThaingsConfig.new
-THAINGS_ROOT = THAINGS_CONFIG.root
-THAINGS_TO_DOS_DIR = THAINGS_CONFIG.to_dos_dir
 
 # Append-only log writer backed by stdlib Logger
 #
@@ -292,7 +290,7 @@ end
 class ToDoStore
   attr_reader :root_dir
 
-  def initialize(root_dir: THAINGS_TO_DOS_DIR)
+  def initialize(root_dir: THAINGS_CONFIG.to_dos_dir)
     @root_dir = root_dir
   end
 
