@@ -3,6 +3,7 @@
 
 require_relative '../thaings'
 require 'open3'
+require 'timeout'
 require 'uri'
 
 # Load .env file
@@ -61,9 +62,16 @@ class BuildsPrompt
 end
 
 # Asks Claude to respond to a prompt
+#
+# Uses two safeguards:
+# - --max-turns: graceful exit at turn boundaries (prevents runaway loops)
+# - Timeout: hard ceiling on wall-clock time (prevents hung processes)
+#
 class AsksClaude
   INSTRUCTIONS_FILE = File.join(THAINGS_ROOT, 'to-do-instructions.txt')
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
+  MAX_TURNS = 10
+  TIMEOUT_SECONDS = 300 # 5 minutes
 
   attr_reader :to_do_dir
 
@@ -79,21 +87,26 @@ class AsksClaude
     else
       "Error: Claude execution failed.\n#{stderr}"
     end
+  rescue Timeout::Error
+    "Error: Claude timed out after #{TIMEOUT_SECONDS} seconds."
   end
 
   private
 
   def run(prompt)
-    stdout, stderr, status = Open3.capture3(
-      '/opt/homebrew/bin/claude',
-      '--continue',
-      '--print',
-      '--append-system-prompt-file', INSTRUCTIONS_FILE,
-      '--allowedTools', ALLOWED_TOOLS.join(','),
-      '-p', prompt,
-      chdir: to_do_dir
-    )
-    [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
+    Timeout.timeout(TIMEOUT_SECONDS) do
+      stdout, stderr, status = Open3.capture3(
+        '/opt/homebrew/bin/claude',
+        '--continue',
+        '--print',
+        '--max-turns', MAX_TURNS.to_s,
+        '--append-system-prompt-file', INSTRUCTIONS_FILE,
+        '--allowedTools', ALLOWED_TOOLS.join(','),
+        '-p', prompt,
+        chdir: to_do_dir
+      )
+      [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
+    end
   end
 end
 
