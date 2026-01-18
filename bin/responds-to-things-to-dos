@@ -99,6 +99,8 @@ end
 
 # Updates Things app via URL scheme
 class UpdatesThings
+  class UpdateFailed < StandardError; end
+
   def append_note(id, text)
     note = "\n\n---\n\n#{text}\n\n***\n\n"
 
@@ -116,7 +118,10 @@ class UpdatesThings
       .map { |k, v| "#{k}=#{URI.encode_www_form_component(v)}" }
       .join('&')
 
-    system('open', '-g', "things:///update?#{query}")
+    url = "things:///update?#{query}"
+    return if system('open', '-g', url)
+
+    raise UpdateFailed, "Failed to open Things URL: #{url[0, 50]}..."
   end
 
   def auth_token
