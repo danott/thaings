@@ -3,80 +3,9 @@
 
 require_relative '../thaings'
 
-# Parses and validates input from Things
-#
-# Raises on invalid input instead of calling exit.
-# Let the caller decide how to handle errors.
-#
-class ThingsInput
-  class InvalidInput < StandardError; end
-
-  attr_reader :raw_input
-
-  def initialize(raw_input)
-    @raw_input = raw_input
-  end
-
-  def data
-    @data ||= parse_json
-  end
-
-  def id
-    value = data['ID']
-    raise InvalidInput, 'Missing ID field' if value.nil? || value.empty?
-
-    value
-  end
-
-  def title
-    data['Title'] || '(no title)'
-  end
-
-  def to_do?
-    data['Type'] == 'To-Do'
-  end
-
-  private
-
-  def parse_json
-    JSON.parse(raw_input)
-  rescue JSON::ParserError => e
-    raise InvalidInput, "Invalid JSON: #{e.message}"
-  end
-end
-
-# Receives a Things to-do via stdin JSON, creates/updates to-do state
-#
-# Usage (from Shortcuts):
-#   echo '{"Type":"To-Do","ID":"abc123","Title":"..."}' | receives-things-to-dos
-#
-class ReceivesThingsToDo
-  attr_reader :input, :store, :log
-
-  def initialize(input, store: ToDoStore.new, log: Log.new(THAINGS_CONFIG.receive_log))
-    @input = input
-    @store = store
-    @log = log
-  end
-
-  def call
-    return unless input.to_do?
-
-    to_do = store.find_or_create(input.id)
-    to_do = store.append_props(to_do, input.data)
-    store.save(to_do)
-
-    log.write('receive', "#{input.id} - #{input.title}")
-    Log.new(to_do.log_file).write('receive', 'Props received from Things')
-  end
-end
-
-# --- Entry point ---
-
 begin
   raw = $stdin.read.force_encoding('UTF-8').strip
-  input = ThingsInput.new(raw)
-  ReceivesThingsToDo.new(input).call
+  ReceivesThingsToDo.new(ThingsInput.new(raw)).call
 rescue ThingsInput::InvalidInput => e
   $stderr.puts e.message
   exit 1
