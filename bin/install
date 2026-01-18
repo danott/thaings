@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require "json"
-require "cgi"
+require "uri"
 
 # Sets up Thaings: creates onboarding to-do in Things and loads daemon
 #
@@ -107,7 +107,7 @@ def install
   # Create to-do in Things
   puts "Creating setup checklist in Things..."
   json = JSON.generate(INSTALL_DATA)
-  encoded = CGI.escape(json).gsub("+", "%20")
+  encoded = URI.encode_www_form_component(json)
   system("open", "-g", "things:///json?data=#{encoded}")
   puts
   puts "Visit your Things Inbox to finish setting up Thaings."

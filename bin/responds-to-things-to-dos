@@ -3,7 +3,7 @@
 
 require_relative '../thaings'
 require 'open3'
-require 'cgi'
+require 'uri'
 
 # Load .env file
 env_file = File.join(THAINGS_ROOT, '.env')
@@ -113,7 +113,7 @@ class UpdatesThings
 
   def open_url(id, params)
     query = params.merge('id' => id, 'auth-token' => auth_token)
-      .map { |k, v| "#{k}=#{CGI.escape(v).gsub('+', '%20')}" }
+      .map { |k, v| "#{k}=#{URI.encode_www_form_component(v)}" }
       .join('&')
 
     system('open', '-g', "things:///update?#{query}")
