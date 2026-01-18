@@ -5,7 +5,7 @@ require_relative '../thaings'
 
 RECEIVE_LOG = File.join(THAINGS_ROOT, 'log', 'receive.log')
 
-# Receives a Things to-do via stdin JSON, creates/updates a task
+# Receives a Things to-do via stdin JSON, creates/updates to-do state
 #
 # Usage (from Shortcuts):
 #   echo '{"Type":"To-Do","ID":"abc123","Title":"..."}' | receives-things-to-dos
@@ -21,12 +21,12 @@ class ReceivesThingsToDo
   def call
     return unless valid?
 
-    task = Task.find_or_create(id)
-    task.append_props(data)
-    task.save!
+    to_do = ToDo.find_or_create(id)
+    to_do.append_props(data)
+    to_do.save!
 
     log.write('receive', "#{id} - #{title}")
-    Log.new(task.log_file).write('receive', 'Props received from Things')
+    Log.new(to_do.log_file).write('receive', 'Props received from Things')
   end
 
   private

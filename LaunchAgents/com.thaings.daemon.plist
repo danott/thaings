@@ -15,7 +15,7 @@
     </array>
     <key>WatchPaths</key>
     <array>
-        <string>/Users/danott/.thaings/tasks</string>
+        <string>/Users/danott/.thaings/to-dos</string>
     </array>
     <key>StandardOutPath</key>
     <string>/Users/danott/.thaings/log/daemon.stdout.log</string>

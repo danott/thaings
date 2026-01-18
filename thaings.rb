@@ -5,7 +5,7 @@ require 'json'
 require 'fileutils'
 
 THAINGS_ROOT = File.expand_path('~/.thaings')
-THAINGS_TASKS_DIR = File.join(THAINGS_ROOT, 'tasks')
+THAINGS_TO_DOS_DIR = File.join(THAINGS_ROOT, 'to-dos')
 
 # Append-only log writer
 #
@@ -36,7 +36,7 @@ class Log
   end
 end
 
-# A task's lifecycle state
+# A to-do's lifecycle state
 #
 # States: pending, working, review
 #
@@ -49,7 +49,7 @@ end
 #   Working → pending/working (agent's turn)
 #   Ready   → review (human's turn)
 #
-class TaskState
+class ToDoState
   TAG_PENDING = 'Working'
   TAG_REVIEW = 'Ready'
   THAINGS_TAGS = [TAG_PENDING, TAG_REVIEW].freeze
@@ -84,19 +84,19 @@ class TaskState
   end
 end
 
-# Domain object for a task from Things
+# Domain object for a to-do from Things
 #
 # Usage:
-#   task = Task.find_or_create('abc123')
-#   task.append_props(data_from_things)
-#   task.save!
+#   to_do = ToDo.find_or_create('abc123')
+#   to_do.append_props(data_from_things)
+#   to_do.save!
 #
-class Task
+class ToDo
   attr_reader :id, :dir, :state, :data
 
   def self.find(id)
-    dir = File.join(THAINGS_TASKS_DIR, id)
-    path = File.join(dir, 'task.json')
+    dir = File.join(THAINGS_TO_DOS_DIR, id)
+    path = File.join(dir, 'to-do.json')
     return nil unless File.exist?(path)
 
     data = JSON.parse(File.read(path, encoding: 'UTF-8'))
@@ -108,7 +108,7 @@ class Task
   end
 
   def self.create(id)
-    dir = File.join(THAINGS_TASKS_DIR, id)
+    dir = File.join(THAINGS_TO_DOS_DIR, id)
     FileUtils.mkdir_p(dir)
 
     data = {
@@ -129,7 +129,7 @@ class Task
     @id = id
     @dir = dir
     @data = data
-    @state = TaskState.new(data['state'])
+    @state = ToDoState.new(data['state'])
   end
 
   # --- Queries ---
@@ -168,7 +168,7 @@ class Task
   end
 
   def non_thaings_tags
-    tags.reject { |t| TaskState::THAINGS_TAGS.include?(t) }
+    tags.reject { |t| ToDoState::THAINGS_TAGS.include?(t) }
   end
 
   # --- Commands ---
@@ -194,17 +194,17 @@ class Task
 
   def save!
     json = JSON.pretty_generate(data)
-    File.write(task_file, json, encoding: 'UTF-8')
+    File.write(to_do_file, json, encoding: 'UTF-8')
   end
 
   # --- Paths ---
 
-  def task_file
-    File.join(dir, 'task.json')
+  def to_do_file
+    File.join(dir, 'to-do.json')
   end
 
   def log_file
-    File.join(dir, 'task.log')
+    File.join(dir, 'to-do.log')
   end
 
   private
@@ -215,7 +215,7 @@ class Task
 
   def update_state(updates)
     data['state'].merge!(updates)
-    @state = TaskState.new(data['state'])
+    @state = ToDoState.new(data['state'])
   end
 
   def now

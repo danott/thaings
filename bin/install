@@ -4,7 +4,7 @@
 require "json"
 require "cgi"
 
-# Sets up Thaings: creates onboarding todo in Things and loads daemon
+# Sets up Thaings: creates onboarding to-do in Things and loads daemon
 #
 # Usage:
 #   ./bin/install
@@ -96,7 +96,7 @@ def install
   system("launchctl", "load", PLIST_DEST)
   puts
 
-  # Create todo in Things
+  # Create to-do in Things
   puts "Creating setup checklist in Things..."
   json = JSON.generate(INSTALL_DATA)
   encoded = CGI.escape(json).gsub("+", "%20")

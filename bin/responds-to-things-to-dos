@@ -18,57 +18,57 @@ end
 
 DAEMON_LOG = File.join(THAINGS_ROOT, 'log', 'daemon.log')
 
-# Finds processable tasks
-class FindsProcessableTasks
+# Finds processable to-dos
+class FindsProcessableToDos
   def call
-    return [] unless Dir.exist?(THAINGS_TASKS_DIR)
+    return [] unless Dir.exist?(THAINGS_TO_DOS_DIR)
 
-    all_tasks
+    all_to_dos
       .select(&:processable?)
       .sort_by { |t| t.received_at || '' }
   end
 
   private
 
-  def all_tasks
-    Dir.glob(File.join(THAINGS_TASKS_DIR, '*', 'task.json')).map do |path|
-      Task.find(File.basename(File.dirname(path)))
+  def all_to_dos
+    Dir.glob(File.join(THAINGS_TO_DOS_DIR, '*', 'to-do.json')).map do |path|
+      ToDo.find(File.basename(File.dirname(path)))
     end.compact
   end
 end
 
-# Builds a prompt from task properties
+# Builds a prompt from to-do properties
 class BuildsPrompt
-  attr_reader :task
+  attr_reader :to_do
 
-  def initialize(task)
-    @task = task
+  def initialize(to_do)
+    @to_do = to_do
   end
 
   def call
     parts = []
-    parts << task.title if task.title
-    parts << "\n\n#{task.notes}" unless task.notes.empty?
-    parts << "\n\nChecklist:\n#{task.checklist}" if checklist_present?
+    parts << to_do.title if to_do.title
+    parts << "\n\n#{to_do.notes}" unless to_do.notes.empty?
+    parts << "\n\nChecklist:\n#{to_do.checklist}" if checklist_present?
     parts.join
   end
 
   private
 
   def checklist_present?
-    task.checklist.is_a?(String) && !task.checklist.empty?
+    to_do.checklist.is_a?(String) && !to_do.checklist.empty?
   end
 end
 
 # Asks Claude to respond to a prompt
 class AsksClaude
-  INSTRUCTIONS_FILE = File.join(THAINGS_ROOT, 'task-instructions.txt')
+  INSTRUCTIONS_FILE = File.join(THAINGS_ROOT, 'to-do-instructions.txt')
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
 
-  attr_reader :task_dir
+  attr_reader :to_do_dir
 
-  def initialize(task_dir)
-    @task_dir = task_dir
+  def initialize(to_do_dir)
+    @to_do_dir = to_do_dir
   end
 
   def call(prompt)
@@ -91,7 +91,7 @@ class AsksClaude
       '--append-system-prompt-file', INSTRUCTIONS_FILE,
       '--allowedTools', ALLOWED_TOOLS.join(','),
       '-p', prompt,
-      chdir: task_dir
+      chdir: to_do_dir
     )
     [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
   end
@@ -124,15 +124,15 @@ class UpdatesThings
   end
 end
 
-# Processes a single task through Claude
-class ProcessesTask
-  attr_reader :task, :things, :daemon_log, :task_log
+# Processes a single to-do through Claude
+class ProcessesToDo
+  attr_reader :to_do, :things, :daemon_log, :to_do_log
 
-  def initialize(task, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
-    @task = task
+  def initialize(to_do, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
+    @to_do = to_do
     @things = things
     @daemon_log = daemon_log
-    @task_log = Log.new(task.log_file)
+    @to_do_log = Log.new(to_do.log_file)
   end
 
   def call
@@ -144,39 +144,39 @@ class ProcessesTask
   private
 
   def start_processing
-    task.mark_working!
-    task.save!
-    set_thaings_tag(TaskState::TAG_PENDING)
+    to_do.mark_working!
+    to_do.save!
+    set_thaings_tag(ToDoState::TAG_PENDING)
 
-    daemon_log.write('start', "#{task.id} - processing")
-    task_log.write('daemon', 'Started processing')
+    daemon_log.write('start', "#{to_do.id} - processing")
+    to_do_log.write('daemon', 'Started processing')
   end
 
   def ask_claude
-    prompt = BuildsPrompt.new(task).call
-    task_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
+    prompt = BuildsPrompt.new(to_do).call
+    to_do_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
 
-    AsksClaude.new(task.dir).call(prompt)
+    AsksClaude.new(to_do.dir).call(prompt)
   end
 
   def finish_processing(response)
-    task.mark_review!
-    task.save!
+    to_do.mark_review!
+    to_do.save!
 
-    things.append_note(task.id, response)
-    set_thaings_tag(TaskState::TAG_REVIEW)
+    things.append_note(to_do.id, response)
+    set_thaings_tag(ToDoState::TAG_REVIEW)
 
-    task_log.write('daemon', 'Completed')
-    daemon_log.write('done', "#{task.id}")
+    to_do_log.write('daemon', 'Completed')
+    daemon_log.write('done', "#{to_do.id}")
   end
 
   def set_thaings_tag(thaings_tag)
-    tags = task.non_thaings_tags + [thaings_tag]
-    things.set_tags(task.id, tags)
+    tags = to_do.non_thaings_tags + [thaings_tag]
+    things.set_tags(to_do.id, tags)
   end
 end
 
-# Entry point: wakes, finds processable tasks, processes them
+# Entry point: wakes, finds processable to-dos, processes them
 class RespondsToThingsToDo
   attr_reader :log
 
@@ -187,16 +187,16 @@ class RespondsToThingsToDo
   def call
     log.write('wake', 'Daemon triggered')
 
-    tasks = FindsProcessableTasks.new.call
+    to_dos = FindsProcessableToDos.new.call
 
-    if tasks.empty?
-      log.write('idle', 'No tasks to process')
+    if to_dos.empty?
+      log.write('idle', 'No to-dos to process')
       return
     end
 
-    log.write('found', "#{tasks.length} task(s) to process")
+    log.write('found', "#{to_dos.length} to-do(s) to process")
 
-    tasks.each { |task| ProcessesTask.new(task).call }
+    to_dos.each { |to_do| ProcessesToDo.new(to_do).call }
 
     log.write('exit', 'Daemon finished')
   end

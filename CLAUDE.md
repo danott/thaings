@@ -12,8 +12,8 @@ thaings is a macOS integration between Things (task management app) and Claude C
 Things App
     ↓ (Automation sends JSON via stdin)
 receives-things-to-dos
-    ↓ (Creates task in ~/.thaings/tasks/{id}/task.json)
-LaunchAgent watches tasks/
+    ↓ (Creates to-do in ~/.thaings/to-dos/{id}/to-do.json)
+LaunchAgent watches to-dos/
     ↓ (Triggers on filesystem change)
 responds-to-things-to-dos
     ↓ (Runs `claude --continue --print -p <prompt>`)
@@ -25,20 +25,20 @@ Things App
 ```
 
 **Key components:**
-- `bin/install` - Sets up Thaings: creates onboarding todo and loads the daemon
-- `bin/receives-things-to-dos` - Receives JSON from Things automation, creates task files
-- `bin/responds-to-things-to-dos` - Processes tasks through Claude, updates Things
-- `LaunchAgents/com.thaings.daemon.plist` - macOS LaunchAgent that triggers daemon on task directory changes
-- `task-instructions.txt` - System prompt for task-processing Claude sessions (passed via `--append-system-prompt-file`)
+- `bin/install` - Sets up Thaings: creates onboarding to-do and loads the daemon
+- `bin/receives-things-to-dos` - Receives JSON from Things automation, creates to-do files
+- `bin/responds-to-things-to-dos` - Processes to-dos through Claude, updates Things
+- `LaunchAgents/com.thaings.daemon.plist` - macOS LaunchAgent that triggers daemon on to-do directory changes
+- `to-do-instructions.txt` - System prompt for to-do-processing Claude sessions (passed via `--append-system-prompt-file`)
 - `.claude/` - Claude config for thaings development (this project)
 
-## Task Lifecycle
+## To-Do Lifecycle
 
-Tasks use two tags to indicate whose turn it is:
+To-dos use two tags to indicate whose turn it is:
 - `Working` - Agent's turn (pending/working)
 - `Ready` - Human's turn (ready for review)
 
-Task state is stored in `~/.thaings/tasks/{id}/task.json`:
+To-do state is stored in `~/.thaings/to-dos/{id}/to-do.json`:
 ```json
 {
   "state": { "status": "pending|working|review", ... },
@@ -62,17 +62,17 @@ launchctl list | grep thaings
 ## Logs
 
 - `~/.thaings/log/daemon.log` - Main daemon activity
-- `~/.thaings/log/receive.log` - Incoming task receipts
+- `~/.thaings/log/receive.log` - Incoming to-do receipts
 - `~/.thaings/log/daemon.stdout.log` / `daemon.stderr.log` - LaunchAgent output
-- `~/.thaings/tasks/{id}/task.log` - Per-task processing log
+- `~/.thaings/to-dos/{id}/to-do.log` - Per-to-do processing log
 
 ## Testing
 
 Run scripts directly for testing:
 ```bash
 # Test receive (pipe JSON to stdin)
-echo '{"Type":"To-Do","ID":"test123","Title":"Test task"}' | ./bin/receives-things-to-dos
+echo '{"Type":"To-Do","ID":"test123","Title":"Test to-do"}' | ./bin/receives-things-to-dos
 
-# Test respond (processes pending tasks)
+# Test respond (processes pending to-dos)
 ./bin/responds-to-things-to-dos
 ```

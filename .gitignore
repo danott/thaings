@@ -4,11 +4,11 @@
 # Logs
 log/*
 !log/.gitkeep
-tasks/*/task.log
+to-dos/*/to-do.log
 
-# Task data (user-specific)
-tasks/*
-!tasks/.gitkeep
+# To-do data (user-specific)
+to-dos/*
+!to-dos/.gitkeep
 
 # Editor/IDE
 .ruby-lsp/
