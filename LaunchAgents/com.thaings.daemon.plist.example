@@ -11,15 +11,15 @@
     </dict>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/danott/.thaings/bin/responds-to-things-to-dos</string>
+        <string>__HOME__/.thaings/bin/responds-to-things-to-dos</string>
     </array>
     <key>WatchPaths</key>
     <array>
-        <string>/Users/danott/.thaings/to-dos</string>
+        <string>__HOME__/.thaings/to-dos</string>
     </array>
     <key>StandardOutPath</key>
-    <string>/Users/danott/.thaings/log/daemon.stdout.log</string>
+    <string>__HOME__/.thaings/log/daemon.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/danott/.thaings/log/daemon.stderr.log</string>
+    <string>__HOME__/.thaings/log/daemon.stderr.log</string>
 </dict>
 </plist>

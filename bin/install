@@ -11,7 +11,10 @@ require "cgi"
 #
 
 THAINGS_ROOT = File.expand_path("~/.thaings")
-PLIST_SOURCE =
+HOME_DIR = File.expand_path("~")
+PLIST_TEMPLATE =
+  File.join(THAINGS_ROOT, "LaunchAgents", "com.thaings.daemon.plist.example")
+PLIST_GENERATED =
   File.join(THAINGS_ROOT, "LaunchAgents", "com.thaings.daemon.plist")
 PLIST_DEST = File.expand_path("~/Library/LaunchAgents/com.thaings.daemon.plist")
 ENV_FILE = File.join(THAINGS_ROOT, ".env")
@@ -89,9 +92,14 @@ def install
     puts "Created .env template"
   end
 
+  # Generate plist from template
+  puts "Generating LaunchAgent plist..."
+  plist_content = File.read(PLIST_TEMPLATE).gsub("__HOME__", HOME_DIR)
+  File.write(PLIST_GENERATED, plist_content)
+
   # Load daemon
   puts "Loading daemon..."
-  system("ln", "-sf", PLIST_SOURCE, PLIST_DEST)
+  system("ln", "-sf", PLIST_GENERATED, PLIST_DEST)
   system("launchctl", "unload", PLIST_DEST, err: File::NULL)
   system("launchctl", "load", PLIST_DEST)
   puts

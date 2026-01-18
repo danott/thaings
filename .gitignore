@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Generated (user-specific paths)
+LaunchAgents/com.thaings.daemon.plist
+
 # Logs
 log/*
 !log/.gitkeep
