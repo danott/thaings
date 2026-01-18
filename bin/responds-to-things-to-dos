@@ -3,5 +3,5 @@
 
 require_relative '../thaings'
 
-EnvLoader.new(THAINGS_CONFIG.env_file).load
+LoadsEnv.new(THAINGS_CONFIG.env_file).call
 RespondsToThingsToDo.new.call

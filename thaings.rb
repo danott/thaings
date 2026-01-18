@@ -37,16 +37,16 @@ end
 # Loads environment variables from a file
 #
 # Usage:
-#   EnvLoader.new(config.env_file).load
+#   LoadsEnv.new(config.env_file).call
 #
-class EnvLoader
+class LoadsEnv
   attr_reader :path
 
   def initialize(path)
     @path = Pathname(path)
   end
 
-  def load
+  def call
     return unless path.exist?
 
     parse_lines.each { |key, value| ENV[key] = value }
