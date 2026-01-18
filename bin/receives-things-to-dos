@@ -11,6 +11,8 @@ RECEIVE_LOG = File.join(THAINGS_ROOT, 'log', 'receive.log')
 #   echo '{"Type":"To-Do","ID":"abc123","Title":"..."}' | receives-things-to-dos
 #
 class ReceivesThingsToDo
+  attr_reader :input, :log
+
   def initialize(input, log: Log.new(RECEIVE_LOG))
     @input = input
     @log = log
@@ -23,7 +25,7 @@ class ReceivesThingsToDo
     task.append_props(data)
     task.save!
 
-    @log.write('receive', "#{id} - #{title}")
+    log.write('receive', "#{id} - #{title}")
     Log.new(task.log_file).write('receive', 'Props received from Things')
   end
 
@@ -45,7 +47,7 @@ class ReceivesThingsToDo
   end
 
   def parse_json
-    JSON.parse(@input)
+    JSON.parse(input)
   rescue JSON::ParserError => e
     $stderr.puts "Invalid JSON: #{e.message}"
     exit 1

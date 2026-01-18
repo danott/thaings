@@ -15,12 +15,14 @@ THAINGS_TASKS_DIR = File.join(THAINGS_ROOT, 'tasks')
 #   # => "2024-01-17T12:00:00Z [tag] message\n"
 #
 class Log
+  attr_reader :path
+
   def initialize(path)
     @path = path
   end
 
   def write(tag, message)
-    File.open(@path, 'a') { |f| f.write(line(tag, message)) }
+    File.open(path, 'a') { |f| f.write(line(tag, message)) }
   end
 
   private
@@ -48,10 +50,9 @@ end
 class TaskState
   STATUSES = %w[waiting working success blocked].freeze
 
-  attr_reader :status
+  attr_reader :status, :props_processed
 
   def initialize(data)
-    @data = data
     @status = data['status']
     @props_processed = data['props_processed'] || 0
   end
@@ -72,8 +73,10 @@ class TaskState
     status == 'success' || status == 'blocked'
   end
 
+  private
+
   def has_new_props?(props_count)
-    props_count > @props_processed
+    props_count > props_processed
   end
 end
 
@@ -85,7 +88,7 @@ end
 #   task.save!
 #
 class Task
-  attr_reader :id, :dir, :state
+  attr_reader :id, :dir, :state, :data
 
   def self.find(id)
     dir = File.join(THAINGS_TASKS_DIR, id)
@@ -137,7 +140,7 @@ class Task
   end
 
   def received_at
-    @data.dig('state', 'received_at')
+    data.dig('state', 'received_at')
   end
 
   def latest_props
@@ -188,7 +191,7 @@ class Task
   end
 
   def save!
-    json = JSON.pretty_generate(@data)
+    json = JSON.pretty_generate(data)
     File.write(task_file, json, encoding: 'UTF-8')
   end
 
@@ -205,12 +208,12 @@ class Task
   private
 
   def props
-    @data['props'] ||= []
+    data['props'] ||= []
   end
 
   def update_state(updates)
-    @data['state'].merge!(updates)
-    @state = TaskState.new(@data['state'])
+    data['state'].merge!(updates)
+    @state = TaskState.new(data['state'])
   end
 
   def now
