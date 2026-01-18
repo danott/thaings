@@ -6,7 +6,6 @@ require 'fileutils'
 
 THAINGS_ROOT = File.expand_path('~/.thaings')
 THAINGS_TASKS_DIR = File.join(THAINGS_ROOT, 'tasks')
-THAINGS_TASK_ENV_BOILERPLATE_DIR = File.join(THAINGS_ROOT, 'task-env-boilerplate')
 
 # Append-only log writer
 #

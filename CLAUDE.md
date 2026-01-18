@@ -28,7 +28,7 @@ Things App
 - `bin/receives-things-to-dos` - Receives JSON from Things automation, creates task files
 - `bin/responds-to-things-to-dos` - Processes tasks through Claude, updates Things
 - `LaunchAgents/com.thaings.daemon.plist` - macOS LaunchAgent that triggers daemon on task directory changes
-- `task-env-boilerplate/` - Claude config symlinked into task folders (sandboxed permissions)
+- `task-instructions.txt` - System prompt for task-processing Claude sessions (passed via `--append-system-prompt-file`)
 - `.claude/` - Claude config for thaings development (this project)
 
 ## Task Lifecycle
