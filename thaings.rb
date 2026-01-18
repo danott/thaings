@@ -3,36 +3,39 @@
 require 'time'
 require 'json'
 require 'fileutils'
+require 'logger'
 
 THAINGS_ROOT = File.expand_path('~/.thaings')
 THAINGS_TO_DOS_DIR = File.join(THAINGS_ROOT, 'to-dos')
 
-# Append-only log writer
+# Append-only log writer backed by stdlib Logger
 #
 # Usage:
 #   log = Log.new('path/to/file.log')
 #   log.write('tag', 'message')
 #   # => "2024-01-17T12:00:00Z [tag] message\n"
 #
+# Benefits over raw File.write:
+#   - Thread-safe writes
+#   - Automatic file handle management
+#
 class Log
   attr_reader :path
 
   def initialize(path)
     @path = path
+    @logger = Logger.new(path)
+    @logger.formatter = method(:format_line)
   end
 
   def write(tag, message)
-    File.open(path, 'a') { |f| f.write(line(tag, message)) }
+    @logger.info { "#{tag}] #{message}" }
   end
 
   private
 
-  def line(tag, message)
-    "#{timestamp} [#{tag}] #{message}\n"
-  end
-
-  def timestamp
-    Time.now.utc.iso8601
+  def format_line(_severity, time, _progname, msg)
+    "#{time.utc.iso8601} [#{msg}\n"
   end
 end
 
