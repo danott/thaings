@@ -160,88 +160,146 @@ class UpdatesThings
   end
 end
 
-# Acquires an exclusive lock on a to-do for processing
+# --- Pipeline Steps ---
 #
-# Usage:
-#   LocksToDoForProcessing.new(to_do).call { do_work }
-#   # => returns block result, or false if already locked
-#
-class LocksToDoForProcessing
-  attr_reader :to_do
+# Each step transforms a ProcessingContext.
+# Simple objects, easy to test in isolation.
 
-  def initialize(to_do)
-    @to_do = to_do
+# Marks to-do as working and persists it
+class MarkWorkingStep
+  def initialize(store:)
+    @store = store
   end
 
-  def call
-    File.open(lock_path, File::RDWR | File::CREAT) do |f|
-      return false unless f.flock(File::LOCK_EX | File::LOCK_NB)
-
-      yield
-    end
-  end
-
-  private
-
-  def lock_path
-    to_do.dir / '.lock'
+  def call(ctx)
+    working = @store.mark_working(ctx.to_do)
+    @store.save(working)
+    ctx.with(to_do: working)
   end
 end
 
+# Updates Things to show "Working" tag
+class SetWorkingTagStep
+  def initialize(things:)
+    @things = things
+  end
+
+  def call(ctx)
+    @things.set_working_tag(ctx.to_do.id, ctx.to_do.tags)
+    ctx
+  end
+end
+
+# Builds prompt and asks Claude, stores response in context
+class AskClaudeStep
+  def initialize(log:)
+    @log = log
+  end
+
+  def call(ctx)
+    prompt = BuildsPrompt.new(ctx.to_do).call
+
+    if prompt.strip.empty?
+      @log.write('daemon', 'Skipped: no content to process')
+      return ctx.with(response: 'Nothing to process - add a title or notes and try again.')
+    end
+
+    @log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
+    response = AsksClaude.new(ctx.to_do.dir).call(prompt)
+    ctx.with(response: response)
+  end
+end
+
+# Marks to-do as review and persists it
+class MarkReviewStep
+  def initialize(store:)
+    @store = store
+  end
+
+  def call(ctx)
+    review = @store.mark_review(ctx.to_do)
+    @store.save(review)
+    ctx.with(to_do: review)
+  end
+end
+
+# Appends Claude's response to the Things note
+class AppendResponseStep
+  def initialize(things:)
+    @things = things
+  end
+
+  def call(ctx)
+    @things.append_note(ctx.to_do.id, ctx.response)
+    ctx
+  end
+end
+
+# Updates Things to show "Ready" tag
+class SetReadyTagStep
+  def initialize(things:)
+    @things = things
+  end
+
+  def call(ctx)
+    @things.set_ready_tag(ctx.to_do.id, ctx.to_do.tags)
+    ctx
+  end
+end
+
+# --- Orchestrator ---
+
 # Processes a single to-do through Claude
+#
+# Lock wraps the pipeline (not a step in it).
+# If locked, we skip. Otherwise, run all steps.
+#
 class ProcessesToDo
-  attr_reader :to_do, :store, :things, :daemon_log, :to_do_log
+  attr_reader :to_do, :store, :things, :daemon_log
 
   def initialize(to_do, store: ToDoStore.new, things: UpdatesThings.new, daemon_log: Log.new(DAEMON_LOG))
     @to_do = to_do
     @store = store
     @things = things
     @daemon_log = daemon_log
-    @to_do_log = Log.new(to_do.log_file)
   end
 
   def call
-    LocksToDoForProcessing.new(to_do).call do
-      working_to_do = start_processing
-      response = ask_claude(working_to_do)
-      finish_processing(working_to_do, response)
-    end || daemon_log.write('skip', "#{to_do.id} - already locked")
+    lock = Lock.new(to_do.dir / '.lock')
+
+    unless lock.acquire
+      daemon_log.write('skip', "#{to_do.id} - already locked")
+      return
+    end
+
+    begin
+      daemon_log.write('start', "#{to_do.id} - processing")
+      to_do_log.write('daemon', 'Started processing')
+
+      pipeline.call(ProcessingContext.new(to_do: to_do))
+
+      to_do_log.write('daemon', 'Completed')
+      daemon_log.write('done', to_do.id)
+    ensure
+      lock.release
+    end
   end
 
   private
 
-  def start_processing
-    working_to_do = store.mark_working(to_do)
-    store.save(working_to_do)
-    things.set_working_tag(to_do.id, to_do.tags)
-
-    daemon_log.write('start', "#{to_do.id} - processing")
-    to_do_log.write('daemon', 'Started processing')
-
-    working_to_do
+  def to_do_log
+    @to_do_log ||= Log.new(to_do.log_file)
   end
 
-  def ask_claude(current_to_do)
-    prompt = BuildsPrompt.new(current_to_do).call
-
-    if prompt.strip.empty?
-      to_do_log.write('daemon', 'Skipped: no content to process')
-      return 'Nothing to process - add a title or notes and try again.'
-    end
-
-    to_do_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-    AsksClaude.new(current_to_do.dir).call(prompt)
-  end
-
-  def finish_processing(working_to_do, response)
-    review_to_do = store.mark_review(working_to_do)
-    store.save(review_to_do)
-
-    things.append_note(to_do.id, response)
-    things.set_ready_tag(to_do.id, to_do.tags)
-
-    to_do_log.write('daemon', 'Completed')
-    daemon_log.write('done', "#{to_do.id}")
+  def pipeline
+    Pipeline.new([
+      MarkWorkingStep.new(store: store),
+      SetWorkingTagStep.new(things: things),
+      AskClaudeStep.new(log: to_do_log),
+      MarkReviewStep.new(store: store),
+      AppendResponseStep.new(things: things),
+      SetReadyTagStep.new(things: things)
+    ])
   end
 end
 

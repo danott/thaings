@@ -41,6 +41,48 @@ class Log
   end
 end
 
+# Null object for Log - useful for testing or when you don't want output
+#
+class NullLog
+  def write(_tag, _message) = nil
+end
+
+# File-based exclusive lock with explicit acquire/release
+#
+# Usage:
+#   lock = Lock.new('/path/to/.lock')
+#   if lock.acquire
+#     begin
+#       do_work
+#     ensure
+#       lock.release
+#     end
+#   else
+#     puts "Already locked"
+#   end
+#
+class Lock
+  attr_reader :path
+
+  def initialize(path)
+    @path = path
+    @file = nil
+  end
+
+  def acquire
+    @file = File.open(path, File::RDWR | File::CREAT)
+    @file.flock(File::LOCK_EX | File::LOCK_NB)
+  end
+
+  def release
+    return unless @file
+
+    @file.flock(File::LOCK_UN)
+    @file.close
+    @file = nil
+  end
+end
+
 # A to-do's lifecycle state (immutable value object)
 #
 # States: pending, working, review
@@ -303,5 +345,52 @@ class ToDoStore
       },
       'props' => to_do.props
     }
+  end
+end
+
+# Immutable context that flows through a processing pipeline
+#
+# Carries the to-do plus any intermediate results (like Claude's response).
+# Each step can return a new context with updated values.
+#
+# Usage:
+#   ctx = ProcessingContext.new(to_do: to_do)
+#   ctx = ctx.with(response: "Hello from Claude")
+#   ctx.response  # => "Hello from Claude"
+#
+class ProcessingContext
+  attr_reader :to_do, :response
+
+  def initialize(to_do:, response: nil)
+    @to_do = to_do
+    @response = response
+  end
+
+  def with(to_do: nil, response: nil)
+    ProcessingContext.new(
+      to_do: to_do || self.to_do,
+      response: response || self.response
+    )
+  end
+end
+
+# Runs a series of steps, threading a context through each
+#
+# Each step must respond to #call(context) and return a context.
+# Steps are simple objects - easy to test in isolation.
+#
+# Usage:
+#   pipeline = Pipeline.new([StepA.new, StepB.new])
+#   result = pipeline.call(initial_context)
+#
+class Pipeline
+  attr_reader :steps
+
+  def initialize(steps)
+    @steps = steps
+  end
+
+  def call(context)
+    steps.reduce(context) { |ctx, step| step.call(ctx) }
   end
 end
