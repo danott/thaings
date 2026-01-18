@@ -100,10 +100,10 @@ class AsksClaude
         '--continue',
         '--print',
         '--max-turns', MAX_TURNS.to_s,
-        '--append-system-prompt-file', INSTRUCTIONS_FILE,
+        '--append-system-prompt-file', INSTRUCTIONS_FILE.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
-        chdir: to_do_dir
+        chdir: to_do_dir.to_s
       )
       [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
     end
@@ -128,7 +128,7 @@ class UpdatesThings
 
   def open_url(id, params)
     query = params.merge('id' => id, 'auth-token' => auth_token)
-      .map { |k, v| "#{k}=#{URI.encode_www_form_component(v)}" }
+      .map { |k, v| "#{k}=#{URI.encode_www_form_component(v).gsub('+', '%20')}" }
       .join('&')
 
     url = "things:///update?#{query}"
@@ -202,8 +202,13 @@ class ProcessesToDo
 
   def ask_claude
     prompt = BuildsPrompt.new(to_do).call
-    to_do_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
 
+    if prompt.strip.empty?
+      to_do_log.write('daemon', 'Skipped: no content to process')
+      return 'Nothing to process - add a title or notes and try again.'
+    end
+
+    to_do_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
     AsksClaude.new(to_do.dir).call(prompt)
   end
 
