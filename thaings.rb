@@ -38,17 +38,21 @@ end
 
 # A task's lifecycle state
 #
-# States: waiting, working, success, blocked
+# States: pending, working, review
 #
 # Transitions:
-#   waiting              → working (picked up for processing)
-#   working              → success (Claude responded Success:)
-#   working              → blocked (Claude responded Blocked: or errored)
-#   success + new_props  → working (user continues conversation)
-#   blocked + new_props  → working (user provides info)
+#   pending              → working (picked up for processing)
+#   working              → review  (Claude responded)
+#   review + new_props   → working (user continues conversation)
+#
+# Tags in Things:
+#   Working → pending/working (agent's turn)
+#   Ready   → review (human's turn)
 #
 class TaskState
-  STATUSES = %w[waiting working success blocked].freeze
+  TAG_PENDING = 'Working'
+  TAG_REVIEW = 'Ready'
+  THAINGS_TAGS = [TAG_PENDING, TAG_REVIEW].freeze
 
   attr_reader :status, :props_processed
 
@@ -58,19 +62,19 @@ class TaskState
   end
 
   def processable?(props_count)
-    waiting? || (finished? && has_new_props?(props_count))
+    pending? || (review? && has_new_props?(props_count))
   end
 
-  def waiting?
-    status == 'waiting'
+  def pending?
+    status == 'pending'
   end
 
   def working?
     status == 'working'
   end
 
-  def finished?
-    status == 'success' || status == 'blocked'
+  def review?
+    status == 'review'
   end
 
   private
@@ -109,11 +113,10 @@ class Task
 
     data = {
       'state' => {
-        'status' => 'waiting',
+        'status' => 'pending',
         'received_at' => Time.now.utc.iso8601,
         'started_at' => nil,
         'completed_at' => nil,
-        'result' => nil,
         'props_processed' => 0
       },
       'props' => []
@@ -164,8 +167,8 @@ class Task
     tags_str.split(',').map(&:strip).reject(&:empty?)
   end
 
-  def non_status_tags
-    tags.reject { |t| TaskState::STATUSES.include?(t.downcase) }
+  def non_thaings_tags
+    tags.reject { |t| TaskState::THAINGS_TAGS.include?(t) }
   end
 
   # --- Commands ---
@@ -181,11 +184,10 @@ class Task
     update_state('status' => 'working', 'started_at' => now)
   end
 
-  def mark_finished!(status, result)
+  def mark_review!
     update_state(
-      'status' => status,
+      'status' => 'review',
       'completed_at' => now,
-      'result' => result,
       'props_processed' => props_count
     )
   end

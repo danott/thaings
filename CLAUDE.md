@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-thaings is a macOS integration between Things (task management app) and Claude Code. When a task is added to Things with a specific tag, it gets processed by Claude and the result is sent back to Things.
+thaings is a macOS integration between Things (task management app) and Claude Code. When the user runs the Thaings shortcut on a to-do, it gets sent to Claude for processing, and the result is appended back to the to-do's notes.
 
 ## Architecture
 
@@ -25,6 +25,7 @@ Things App
 ```
 
 **Key components:**
+- `bin/install` - Sets up Thaings: creates onboarding todo and loads the daemon
 - `bin/receives-things-to-dos` - Receives JSON from Things automation, creates task files
 - `bin/responds-to-things-to-dos` - Processes tasks through Claude, updates Things
 - `LaunchAgents/com.thaings.daemon.plist` - macOS LaunchAgent that triggers daemon on task directory changes
@@ -33,12 +34,14 @@ Things App
 
 ## Task Lifecycle
 
-Tasks use status tags: `waiting` → `working` → `success` or `blocked`
+Tasks use two tags to indicate whose turn it is:
+- `Working` - Agent's turn (pending/working)
+- `Ready` - Human's turn (ready for review)
 
 Task state is stored in `~/.thaings/tasks/{id}/task.json`:
 ```json
 {
-  "state": { "status": "waiting|working|success|blocked", ... },
+  "state": { "status": "pending|working|review", ... },
   "props": [{ "received_at": "...", "data": { "Title": "...", "Notes": "..." } }]
 }
 ```
@@ -70,6 +73,6 @@ Run scripts directly for testing:
 # Test receive (pipe JSON to stdin)
 echo '{"Type":"To-Do","ID":"test123","Title":"Test task"}' | ./bin/receives-things-to-dos
 
-# Test respond (processes waiting tasks)
+# Test respond (processes pending tasks)
 ./bin/responds-to-things-to-dos
 ```

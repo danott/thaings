@@ -62,8 +62,6 @@ end
 
 # Asks Claude to respond to a prompt
 class AsksClaude
-  Response = Struct.new(:status, :text)
-
   INSTRUCTIONS_FILE = File.join(THAINGS_ROOT, 'task-instructions.txt')
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
 
@@ -77,9 +75,9 @@ class AsksClaude
     stdout, stderr, process = run(prompt)
 
     if process.success?
-      parse_response(stdout)
+      stdout
     else
-      Response.new('blocked', "Blocked: Claude execution failed.\n#{stderr}")
+      "Error: Claude execution failed.\n#{stderr}"
     end
   end
 
@@ -96,18 +94,6 @@ class AsksClaude
       chdir: task_dir
     )
     [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
-  end
-
-  def parse_response(output)
-    first_line = output.lines.first&.strip || ''
-
-    if first_line.start_with?('Success:')
-      Response.new('success', output)
-    elsif first_line.start_with?('Blocked:')
-      Response.new('blocked', output)
-    else
-      Response.new('blocked', "Blocked: No clear status prefix.\n\n#{output}")
-    end
   end
 end
 
@@ -161,7 +147,7 @@ class ProcessesTask
   def start_processing
     task.mark_working!
     task.save!
-    update_things_status('working')
+    set_thaings_tag(TaskState::TAG_PENDING)
 
     daemon_log.write('start', "#{task.id} - processing")
     task_log.write('daemon', 'Started processing')
@@ -175,18 +161,18 @@ class ProcessesTask
   end
 
   def finish_processing(response)
-    task.mark_finished!(response.status, response.text)
+    task.mark_review!
     task.save!
 
-    things.append_note(task.id, response.text)
-    update_things_status(response.status)
+    things.append_note(task.id, response)
+    set_thaings_tag(TaskState::TAG_REVIEW)
 
-    task_log.write('daemon', "Completed: #{response.status}")
-    daemon_log.write('done', "#{task.id} - #{response.status}")
+    task_log.write('daemon', 'Completed')
+    daemon_log.write('done', "#{task.id}")
   end
 
-  def update_things_status(status)
-    tags = task.non_status_tags + [status]
+  def set_thaings_tag(thaings_tag)
+    tags = task.non_thaings_tags + [thaings_tag]
     things.set_tags(task.id, tags)
   end
 end

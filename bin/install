@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "cgi"
+
+# Sets up Thaings: creates onboarding todo in Things and loads daemon
+#
+# Usage:
+#   ./bin/install
+#
+
+THAINGS_ROOT = File.expand_path("~/.thaings")
+PLIST_SOURCE =
+  File.join(THAINGS_ROOT, "LaunchAgents", "com.thaings.daemon.plist")
+PLIST_DEST = File.expand_path("~/Library/LaunchAgents/com.thaings.daemon.plist")
+ENV_FILE = File.join(THAINGS_ROOT, ".env")
+ENV_TEMPLATE = "THINGS_AUTH_TOKEN=paste-your-token-here\n"
+
+NOTES = <<~NOTES
+  Welcome to Thaings! Follow the steps below to augment your to-dos with agentic workers.
+
+  ## 1. Manually create tags
+
+  Thaings uses tags to communicate status back into Things. This is completely optional, but is useful for seeing things moving.
+
+  1. `Working`
+  2. `Ready`
+
+  Sadly, there's no way to automate tag creation. Open the tag editor to create them manually (⌃⌘T or Window → Tags in the macOS toolbar).
+
+  ## 2. Enable Things URLs
+
+  In the macOS toolbar:
+
+  Things → Settings → General → Enable Things URLs.
+
+  Click "Manage" and copy your auth token.
+
+  ## 3. Save auth token
+
+  Paste your token into the `.env` configuration file so Thaings can update the notes and tags on your to-dos.
+
+  [Reveal the file in Finder](file://#{THAINGS_ROOT}/.env) then edit and save with TextEdit or your favorite text editor.
+
+  ## 4. Install Apple Shortcut
+
+  Apple Shortcuts is the only way to communicate state from Things to Thaings.
+
+  [Reveal the file in Finder](file://#{THAINGS_ROOT}/Thaings.shortcut) then double-click to install the shortcut.
+
+  ## 5. Known limitations
+
+  The shortcut sends selected items from Things to Thaings. It is important that the Things to-dos are collapsed when you do this. Appending notes to a to-do is flaky if the notes field is focused in the GUI. Once you queue up a to-do, just let it rest until you see it tagged as `Ready`. Go for a walk. Write a poem. The world is out there while the agents are working in here!
+
+  ## 6. Try it out!
+
+  Check off the items in the checklist below once you've completed them. Collapse this to-do, keep it selected, and run the Thaings shortcut. Watch the tags change from `Working` to `Ready`, then re-open to see what Thaings responded with in this to-do's notes!
+NOTES
+
+def checklist_item(title)
+  { "type" => "checklist-item", "attributes" => { "title" => title } }
+end
+
+INSTALL_DATA = [
+  {
+    "type" => "to-do",
+    "attributes" => {
+      "title" => "Set up Thaings",
+      "notes" => NOTES,
+      "checklist-items" => [
+        checklist_item("Tags created"),
+        checklist_item("Things URLs enabled"),
+        checklist_item("Auth token saved"),
+        checklist_item("Shortcut installed"),
+        checklist_item("Ready to test")
+      ]
+    }
+  }
+].freeze
+
+def install
+  puts "Setting up Thaings..."
+  puts
+
+  # Create .env template if it doesn't exist
+  unless File.exist?(ENV_FILE)
+    File.write(ENV_FILE, ENV_TEMPLATE)
+    puts "Created .env template"
+  end
+
+  # Load daemon
+  puts "Loading daemon..."
+  system("ln", "-sf", PLIST_SOURCE, PLIST_DEST)
+  system("launchctl", "unload", PLIST_DEST, err: File::NULL)
+  system("launchctl", "load", PLIST_DEST)
+  puts
+
+  # Create todo in Things
+  puts "Creating setup checklist in Things..."
+  json = JSON.generate(INSTALL_DATA)
+  encoded = CGI.escape(json).gsub("+", "%20")
+  system("open", "-g", "things:///json?data=#{encoded}")
+  puts
+  puts "Visit your Things Inbox to finish setting up Thaings."
+end
+
+install
