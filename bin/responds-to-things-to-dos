@@ -100,8 +100,7 @@ end
 # Updates Things app via URL scheme
 class UpdatesThings
   def append_note(id, text)
-    timestamp = Time.now.strftime('%Y-%m-%d %H:%M')
-    note = "\n---\n[#{timestamp}]\n#{text}"
+    note = "\n\n---\n\n#{text}\n\n***\n\n"
 
     open_url(id, 'append-notes' => note)
   end

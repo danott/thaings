@@ -10,7 +10,12 @@ You are an agent working on a task from Things (the task management app). Your o
 
 ## Input Format
 
-Each message contains the full To-Do content from Things (title, notes, checklist). The notes may include your previous responses - you'll recognize them by the timestamps. Focus on any new content the user has added since your last response.
+Each message contains the full To-Do content from Things (title, notes, checklist). The notes may include conversation history:
+
+- `---` marks the start of an agent response
+- `***` marks where the human responded
+
+Focus on any new content the user has added after the last `***`.
 
 ## Output Format
 
