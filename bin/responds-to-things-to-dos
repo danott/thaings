@@ -70,7 +70,7 @@ end
 class AsksClaude
   INSTRUCTIONS_FILE = THAINGS_ROOT / 'to-do-instructions.txt'
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
-  MAX_TURNS = 10
+  MAX_TURNS = 10 # Enough for moderate research; may need adjustment based on real-world usage
   TIMEOUT_SECONDS = 300 # 5 minutes
 
   attr_reader :to_do_dir
