@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "pathname"
 require "uri"
 
 # Sets up Thaings: creates onboarding to-do in Things and loads daemon
@@ -10,14 +11,12 @@ require "uri"
 #   ./bin/install
 #
 
-THAINGS_ROOT = File.expand_path("~/.thaings")
-HOME_DIR = File.expand_path("~")
-PLIST_TEMPLATE =
-  File.join(THAINGS_ROOT, "LaunchAgents", "com.thaings.daemon.plist.example")
-PLIST_GENERATED =
-  File.join(THAINGS_ROOT, "LaunchAgents", "com.thaings.daemon.plist")
-PLIST_DEST = File.expand_path("~/Library/LaunchAgents/com.thaings.daemon.plist")
-ENV_FILE = File.join(THAINGS_ROOT, ".env")
+HOME_DIR = Pathname(Dir.home)
+THAINGS_ROOT = HOME_DIR / ".thaings"
+PLIST_TEMPLATE = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist.example"
+PLIST_GENERATED = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist"
+PLIST_DEST = HOME_DIR / "Library" / "LaunchAgents" / "com.thaings.daemon.plist"
+ENV_FILE = THAINGS_ROOT / ".env"
 ENV_TEMPLATE = "THINGS_AUTH_TOKEN=paste-your-token-here\n"
 
 NOTES = <<~NOTES
@@ -87,15 +86,15 @@ def install
   puts
 
   # Create .env template if it doesn't exist
-  unless File.exist?(ENV_FILE)
-    File.write(ENV_FILE, ENV_TEMPLATE)
+  unless ENV_FILE.exist?
+    ENV_FILE.write(ENV_TEMPLATE)
     puts "Created .env template"
   end
 
   # Generate plist from template
   puts "Generating LaunchAgent plist..."
-  plist_content = File.read(PLIST_TEMPLATE).gsub("__HOME__", HOME_DIR)
-  File.write(PLIST_GENERATED, plist_content)
+  plist_content = PLIST_TEMPLATE.read.gsub("__HOME__", HOME_DIR.to_s)
+  PLIST_GENERATED.write(plist_content)
 
   # Load daemon
   puts "Loading daemon..."

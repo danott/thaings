@@ -4,9 +4,10 @@ require 'time'
 require 'json'
 require 'fileutils'
 require 'logger'
+require 'pathname'
 
-THAINGS_ROOT = File.expand_path('~/.thaings')
-THAINGS_TO_DOS_DIR = File.join(THAINGS_ROOT, 'to-dos')
+THAINGS_ROOT = Pathname(Dir.home) / '.thaings'
+THAINGS_TO_DOS_DIR = THAINGS_ROOT / 'to-dos'
 
 # Append-only log writer backed by stdlib Logger
 #
@@ -129,11 +130,11 @@ class ToDo
 
   def self.find(id)
     ValidatesId.new(id).call
-    dir = File.join(THAINGS_TO_DOS_DIR, id)
-    path = File.join(dir, 'to-do.json')
-    return nil unless File.exist?(path)
+    dir = THAINGS_TO_DOS_DIR / id
+    path = dir / 'to-do.json'
+    return nil unless path.exist?
 
-    data = JSON.parse(File.read(path, encoding: 'UTF-8'))
+    data = JSON.parse(path.read(encoding: 'UTF-8'))
     new(id: id, dir: dir, data: data)
   end
 
@@ -143,8 +144,8 @@ class ToDo
 
   def self.create(id)
     ValidatesId.new(id).call
-    dir = File.join(THAINGS_TO_DOS_DIR, id)
-    FileUtils.mkdir_p(dir)
+    dir = THAINGS_TO_DOS_DIR / id
+    dir.mkpath
 
     data = {
       'state' => {
@@ -235,11 +236,11 @@ class ToDo
   # --- Paths ---
 
   def to_do_file
-    File.join(dir, 'to-do.json')
+    dir / 'to-do.json'
   end
 
   def log_file
-    File.join(dir, 'to-do.log')
+    dir / 'to-do.log'
   end
 
   private
