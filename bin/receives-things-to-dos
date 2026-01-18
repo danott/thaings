@@ -3,7 +3,7 @@
 
 require_relative '../thaings'
 
-RECEIVE_LOG = File.join(THAINGS_ROOT, 'log', 'receive.log')
+RECEIVE_LOG = THAINGS_ROOT / 'log' / 'receive.log'
 
 # Receives a Things to-do via stdin JSON, creates/updates to-do state
 #

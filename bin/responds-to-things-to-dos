@@ -6,9 +6,9 @@ require 'open3'
 require 'uri'
 
 # Load .env file
-env_file = File.join(THAINGS_ROOT, '.env')
-if File.exist?(env_file)
-  File.readlines(env_file).each do |line|
+env_file = THAINGS_ROOT / '.env'
+if env_file.exist?
+  env_file.readlines.each do |line|
     line = line.strip
     next if line.empty? || line.start_with?('#')
     key, value = line.split('=', 2)
@@ -16,12 +16,12 @@ if File.exist?(env_file)
   end
 end
 
-DAEMON_LOG = File.join(THAINGS_ROOT, 'log', 'daemon.log')
+DAEMON_LOG = THAINGS_ROOT / 'log' / 'daemon.log'
 
 # Finds processable to-dos
 class FindsProcessableToDos
   def call
-    return [] unless Dir.exist?(THAINGS_TO_DOS_DIR)
+    return [] unless THAINGS_TO_DOS_DIR.exist?
 
     all_to_dos
       .select(&:processable?)
@@ -31,8 +31,8 @@ class FindsProcessableToDos
   private
 
   def all_to_dos
-    Dir.glob(File.join(THAINGS_TO_DOS_DIR, '*', 'to-do.json')).map do |path|
-      ToDo.find(File.basename(File.dirname(path)))
+    THAINGS_TO_DOS_DIR.glob('*/to-do.json').map do |path|
+      ToDo.find(path.dirname.basename.to_s)
     end.compact
   end
 end
@@ -62,7 +62,7 @@ end
 
 # Asks Claude to respond to a prompt
 class AsksClaude
-  INSTRUCTIONS_FILE = File.join(THAINGS_ROOT, 'to-do-instructions.txt')
+  INSTRUCTIONS_FILE = THAINGS_ROOT / 'to-do-instructions.txt'
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
 
   attr_reader :to_do_dir
