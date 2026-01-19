@@ -192,59 +192,42 @@ class ToDo
   end
 end
 
-# Processing state for one to-do ID
+# Processing state for one to-do ID (immutable value object)
 #
-# Tracks messages received and what's been processed.
-# Reads from filesystem - not a pure value object.
+# All state captured at construction - no filesystem reads after that.
+# QueueStore handles all I/O and returns Queue snapshots.
 #
 class Queue
-  attr_reader :id, :dir
+  attr_reader :id, :dir, :messages, :processed_at
 
-  def initialize(id:, dir:)
+  def initialize(id:, dir:, messages: [], processed_at: '')
     @id = id
     @dir = dir
+    @messages = messages.freeze
+    @processed_at = processed_at
   end
 
   def processable?
     latest_message_at && latest_message_at > processed_at
   end
 
-  def latest_message_at
-    message_files.last&.basename('.json')&.to_s
-  end
-
-  def processed_at
-    processed_file.exist? ? processed_file.read.strip : ''
-  end
-
   def latest_message
-    file = message_files.last
-    return nil unless file
-
-    data = JSON.parse(file.read(encoding: 'UTF-8'))
-    Message.new(received_at: file.basename('.json').to_s, data: data)
+    messages.last
   end
 
-  def to_do
-    msg = latest_message
-    msg ? ToDo.from_message(msg) : nil
+  def latest_message_at
+    latest_message&.received_at
   end
 
-  # Paths
+  # Paths (no I/O, just path construction)
   def messages_dir = dir / 'messages'
   def processed_file = dir / 'processed'
   def log_file = dir / 'queue.log'
-
-  private
-
-  def message_files
-    return [] unless messages_dir.exist?
-
-    messages_dir.glob('*.json').sort_by(&:basename)
-  end
 end
 
 # Manages queues on disk with pending markers for fast lookup
+#
+# All filesystem I/O happens here. Queue objects are immutable snapshots.
 #
 # Storage:
 #   pending/{id}                    - marker file (presence = has work)
@@ -265,13 +248,13 @@ class QueueStore
     config.pending_dir.glob('*').map { |p| p.basename.to_s }
   end
 
-  # Load a queue by ID
+  # Load a queue snapshot by ID
   def find(id)
     ValidatesId.new(id).call
     dir = config.queues_dir / id
     return nil unless dir.exist?
 
-    Queue.new(id: id, dir: dir)
+    load_queue(id, dir)
   end
 
   # Write a new message and mark as pending
@@ -288,17 +271,51 @@ class QueueStore
 
     touch_pending(id)
 
-    Queue.new(id: id, dir: dir)
+    load_queue(id, dir)
   end
 
   # Mark a specific message as processed
   # Only clears pending if no newer messages arrived during processing
   def mark_processed(queue, timestamp)
     queue.processed_file.write(timestamp)
-    clear_pending(queue.id) unless queue.latest_message_at > timestamp
+
+    # Read current state from disk to check if we're caught up
+    current_latest = read_latest_message_at(queue.id)
+    clear_pending(queue.id) unless current_latest && current_latest > timestamp
   end
 
   private
+
+  def load_queue(id, dir)
+    Queue.new(
+      id: id,
+      dir: dir,
+      messages: load_messages(dir / 'messages'),
+      processed_at: load_processed_at(dir / 'processed')
+    )
+  end
+
+  def load_messages(messages_dir)
+    return [] unless messages_dir.exist?
+
+    messages_dir.glob('*.json').sort_by(&:basename).map do |file|
+      data = JSON.parse(file.read(encoding: 'UTF-8'))
+      Message.new(received_at: file.basename('.json').to_s, data: data)
+    end
+  end
+
+  def load_processed_at(processed_file)
+    processed_file.exist? ? processed_file.read.strip : ''
+  end
+
+  def read_latest_message_at(id)
+    dir = config.queues_dir / id
+    messages_dir = dir / 'messages'
+    return nil unless messages_dir.exist?
+
+    files = messages_dir.glob('*.json').sort_by(&:basename)
+    files.last&.basename('.json')&.to_s
+  end
 
   def touch_pending(id)
     config.pending_dir.mkpath
