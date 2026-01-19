@@ -1,10 +1,9 @@
 # frozen_string_literal: true
 
-require_relative '../thaings'
+require_relative 'thaings'
 
 # Wire dependencies at the edge
-root = Pathname(__FILE__).dirname.parent.expand_path
-config = ThaingsConfig.new(root: root)
+config = ThaingsConfig.new
 store = QueueStore.new(config: config)
 log = Log.new(config.receive_log)
 

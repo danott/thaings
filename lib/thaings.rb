@@ -25,7 +25,7 @@ require 'uri'
 class ThaingsConfig
   attr_reader :root
 
-  def initialize(root: Pathname(Dir.home) / '.thaings')
+  def initialize(root: Pathname(__FILE__).dirname.parent.expand_path)
     @root = Pathname(root)
   end
 
