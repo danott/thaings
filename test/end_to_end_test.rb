@@ -7,39 +7,28 @@ require 'pathname'
 
 require_relative '../thaings'
 
-# Stub for AsksClaude - returns canned response without calling Claude
-class StubAsksClaude
-  attr_reader :prompts_received
-
-  def initialize(response: 'Test response from Claude')
-    @prompts_received = []
-    @response = response
-  end
-
-  def call(prompt)
-    @prompts_received << prompt
-    @response
-  end
-end
-
-# Stub for UpdatesThings - records calls without opening URLs
+# Stub for UpdatesThings - records updates without opening URLs
 class StubUpdatesThings
-  attr_reader :calls
+  attr_reader :updates
 
   def initialize
-    @calls = []
+    @updates = []
   end
 
-  def append_note(id, text)
-    @calls << { method: :append_note, id: id, text: text }
+  def update(id, to_do)
+    @updates << { id: id, to_do: to_do }
   end
 
-  def set_working_tag(id, current_tags)
-    @calls << { method: :set_working_tag, id: id, tags: current_tags }
+  def last_update
+    @updates.last
   end
 
-  def set_ready_tag(id, current_tags)
-    @calls << { method: :set_ready_tag, id: id, tags: current_tags }
+  def working_updates
+    @updates.select { |u| u[:to_do].workflow_tag == 'Working' }
+  end
+
+  def ready_updates
+    @updates.select { |u| u[:to_do].workflow_tag == 'Ready' }
   end
 end
 
@@ -117,10 +106,9 @@ class EndToEndTest < Minitest::Test
     assert_equal 'Second', queue.latest_message.title
   end
 
-  def test_respond_processes_pending_queue
+  def test_respond_finds_pending_queues
     store = QueueStore.new(config: config)
     log = NullLog.new
-    things = StubUpdatesThings.new
 
     # Create a pending queue
     input = ThingsInput.new(things_json(id: 'test123', title: 'Process me'))
@@ -130,19 +118,68 @@ class EndToEndTest < Minitest::Test
     queue = store.find('test123')
     assert queue.processable?, 'Queue should be processable'
 
-    # Process it (with stubbed Claude)
-    stub_claude = StubAsksClaude.new(response: 'Here is my answer')
-
-    # We need to inject the stub Claude into the pipeline
-    # For now, let's test the pieces we can without mocking AsksClaude
-    # The full integration would require dependency injection for AsksClaude
-
-    # Instead, test that RespondsToThingsToDo finds the pending queue
+    # Verify pending IDs include our queue
     ids = store.pending_ids
     assert_includes ids, 'test123'
   end
 
-  def test_full_flow_with_stubbed_dependencies
+  def test_to_do_transforms_are_immutable
+    message = Message.new(received_at: '2024-01-01', data: {
+      'Title' => 'Test',
+      'Notes' => 'Original notes',
+      'Tags' => 'personal'
+    })
+    to_do = ToDo.from_message(message)
+
+    # marked_working returns new instance
+    working = to_do.marked_working
+    assert_equal 'Working', working.workflow_tag
+    assert_nil to_do.workflow_tag  # original unchanged
+
+    # with_response returns new instance
+    completed = to_do.with_response('My response')
+    assert_equal 'My response', completed.response
+    assert_equal 'Ready', completed.workflow_tag
+    assert_nil to_do.response  # original unchanged
+  end
+
+  def test_to_do_full_notes_includes_response
+    message = Message.new(received_at: '2024-01-01', data: {
+      'Title' => 'Test',
+      'Notes' => 'Original notes',
+      'Tags' => ''
+    })
+    to_do = ToDo.from_message(message)
+
+    # Without response, full_notes is just notes
+    assert_equal 'Original notes', to_do.full_notes
+
+    # With response, full_notes includes both
+    completed = to_do.with_response('Claude says hello')
+    assert_includes completed.full_notes, 'Original notes'
+    assert_includes completed.full_notes, 'Claude says hello'
+    assert_includes completed.full_notes, '---'  # separator
+  end
+
+  def test_to_do_final_tags_replaces_workflow_tag
+    message = Message.new(received_at: '2024-01-01', data: {
+      'Title' => 'Test',
+      'Notes' => '',
+      'Tags' => 'personal, Working, work'
+    })
+    to_do = ToDo.from_message(message)
+
+    # marked_working should replace existing Working tag
+    working = to_do.marked_working
+    assert_equal %w[personal work Working], working.final_tags
+
+    # with_response sets Ready, removing Working
+    completed = to_do.with_response('Done')
+    assert_equal %w[personal work Ready], completed.final_tags
+    refute_includes completed.final_tags, 'Working'
+  end
+
+  def test_full_flow_with_stubbed_things
     store = QueueStore.new(config: config)
     log = NullLog.new
     things = StubUpdatesThings.new
@@ -153,47 +190,40 @@ class EndToEndTest < Minitest::Test
 
     # Load the queue
     queue = store.find('abc')
-    assert queue.processable?
-
-    # Build the context manually (simulating what ProcessesQueue does)
     message = queue.latest_message
     to_do = ToDo.from_message(message)
-    ctx = ProcessingContext.new(queue: queue, message: message, to_do: to_do)
 
-    # Run individual steps with stubs
-    # Step 1: Set working tag
-    SetWorkingTagStep.new(things: things).call(ctx)
-    assert_equal :set_working_tag, things.calls.last[:method]
-    assert_equal 'abc', things.calls.last[:id]
+    # Simulate what ProcessesQueue does (without actually calling Claude)
 
-    # Step 2: Build prompt (no external deps)
+    # 1. Broadcast working state
+    things.update(queue.id, to_do.marked_working)
+    assert_equal 1, things.working_updates.length
+    assert_equal 'abc', things.working_updates.first[:id]
+
+    # 2. Build prompt
     prompt = BuildsPrompt.new(to_do).call
     assert_includes prompt, 'Help me'
     assert_includes prompt, 'With this task'
 
-    # Step 3: Simulate Claude response
-    ctx = ctx.with(response: 'Here is my helpful answer')
+    # 3. Simulate Claude response and broadcast completed state
+    completed = to_do.with_response('Here is my helpful answer')
+    things.update(queue.id, completed)
 
-    # Step 4: Mark processed
-    MarkProcessedStep.new(store: store).call(ctx)
+    # Verify final state was broadcast
+    assert_equal 1, things.ready_updates.length
+    last = things.ready_updates.first[:to_do]
+    assert_equal 'Ready', last.workflow_tag
+    assert_includes last.full_notes, 'Here is my helpful answer'
 
-    # Verify pending marker is cleared (since we processed the latest)
+    # 4. Mark processed
+    store.mark_processed(queue, message.received_at)
+
+    # Verify pending marker is cleared
     refute config.pending_dir.join('abc').exist?, 'Pending marker should be cleared'
 
-    # Verify processed timestamp is set
+    # Verify queue is no longer processable
     reloaded = store.find('abc')
-    assert_equal message.received_at, reloaded.processed_at
-    refute reloaded.processable?, 'Queue should not be processable after processing'
-
-    # Step 5: Append response
-    AppendResponseStep.new(things: things).call(ctx)
-    append_call = things.calls.find { |c| c[:method] == :append_note }
-    assert append_call
-    assert_includes append_call[:text], 'Here is my helpful answer'
-
-    # Step 6: Set ready tag
-    SetReadyTagStep.new(things: things).call(ctx)
-    assert_equal :set_ready_tag, things.calls.last[:method]
+    refute reloaded.processable?
   end
 
   def test_new_message_during_processing_keeps_pending

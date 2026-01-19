@@ -165,18 +165,23 @@ class Message
   end
 end
 
-# The content to process (derived from a Message)
+# The to-do state (immutable value object)
 #
-# Just the stuff we need to build a prompt.
+# Represents the complete desired state - content, response, workflow tag.
+# Transforms return new instances. Broadcast the final state to Things.
 #
 class ToDo
-  attr_reader :title, :notes, :tags, :checklist
+  WORKFLOW_TAGS = %w[Working Ready].freeze
 
-  def initialize(title:, notes:, tags:, checklist:)
+  attr_reader :title, :notes, :tags, :checklist, :response, :workflow_tag
+
+  def initialize(title:, notes:, tags:, checklist:, response: nil, workflow_tag: nil)
     @title = title
     @notes = notes
-    @tags = tags
+    @tags = tags.freeze
     @checklist = checklist
+    @response = response
+    @workflow_tag = workflow_tag
   end
 
   def self.from_message(message)
@@ -186,6 +191,44 @@ class ToDo
       tags: message.tags,
       checklist: message.checklist
     )
+  end
+
+  # --- Transforms (return new ToDo) ---
+
+  def marked_working
+    with(workflow_tag: 'Working')
+  end
+
+  def with_response(text)
+    with(response: text, workflow_tag: 'Ready')
+  end
+
+  # --- Computed state ---
+
+  def full_notes
+    return notes unless response
+    "#{notes}\n\n---\n\n#{response}\n\n***\n\n"
+  end
+
+  def final_tags
+    non_workflow_tags + [workflow_tag].compact
+  end
+
+  private
+
+  def with(response: nil, workflow_tag: nil)
+    ToDo.new(
+      title: title,
+      notes: notes,
+      tags: tags,
+      checklist: checklist,
+      response: response || self.response,
+      workflow_tag: workflow_tag || self.workflow_tag
+    )
+  end
+
+  def non_workflow_tags
+    tags.reject { |t| WORKFLOW_TAGS.include?(t) }
   end
 end
 
@@ -458,38 +501,23 @@ class AsksClaude
   end
 end
 
-# Updates Things app via URL scheme
+# Broadcasts to-do state to Things app via URL scheme
+#
+# Declarative: takes a ToDo and broadcasts its current state.
+# The ToDo knows what it should look like; this just sends it.
 #
 class UpdatesThings
-  TAG_WORKING = 'Working'
-  TAG_READY = 'Ready'
-  THAINGS_TAGS = [TAG_WORKING, TAG_READY].freeze
-
   class UpdateFailed < StandardError; end
 
-  def append_note(id, text)
-    note = "\n\n---\n\n#{text}\n\n***\n\n"
-    open_url(id, 'append-notes' => note)
-  end
+  def update(id, to_do)
+    params = {}
+    params['notes'] = to_do.full_notes if to_do.response
+    params['tags'] = to_do.final_tags.join(',') if to_do.workflow_tag
 
-  def set_working_tag(id, current_tags)
-    set_workflow_tag(id, current_tags, TAG_WORKING)
-  end
-
-  def set_ready_tag(id, current_tags)
-    set_workflow_tag(id, current_tags, TAG_READY)
+    open_url(id, params) unless params.empty?
   end
 
   private
-
-  def set_workflow_tag(id, current_tags, new_tag)
-    tags = without_thaings_tags(current_tags) + [new_tag]
-    open_url(id, 'tags' => tags.join(','))
-  end
-
-  def without_thaings_tags(tags)
-    tags.reject { |t| THAINGS_TAGS.include?(t) }
-  end
 
   def open_url(id, params)
     query = params.merge('id' => id, 'auth-token' => auth_token)
@@ -507,126 +535,10 @@ class UpdatesThings
   end
 end
 
-# Immutable context that flows through a processing pipeline
-#
-# Captures the message at the start of processing so we know
-# exactly which message we processed (for race condition safety).
-#
-class ProcessingContext
-  attr_reader :queue, :message, :to_do, :response
-
-  def initialize(queue:, message:, to_do:, response: nil)
-    @queue = queue
-    @message = message
-    @to_do = to_do
-    @response = response
-  end
-
-  def with(response: nil)
-    ProcessingContext.new(
-      queue: queue,
-      message: message,
-      to_do: to_do,
-      response: response || self.response
-    )
-  end
-end
-
-# Runs a series of steps, threading a context through each
-#
-class Pipeline
-  attr_reader :steps
-
-  def initialize(steps)
-    @steps = steps
-  end
-
-  def call(context)
-    steps.reduce(context) { |ctx, step| step.call(ctx) }
-  end
-end
-
-# --- Pipeline Steps ---
-
-# Updates Things to show "Working" tag
-#
-class SetWorkingTagStep
-  def initialize(things:)
-    @things = things
-  end
-
-  def call(ctx)
-    @things.set_working_tag(ctx.queue.id, ctx.to_do.tags)
-    ctx
-  end
-end
-
-# Builds prompt and asks Claude, stores response in context
-#
-class AskClaudeStep
-  def initialize(log:, instructions_file:)
-    @log = log
-    @instructions_file = instructions_file
-  end
-
-  def call(ctx)
-    prompt = BuildsPrompt.new(ctx.to_do).call
-
-    if prompt.strip.empty?
-      @log.write('daemon', 'Skipped: no content to process')
-      return ctx.with(response: 'Nothing to process - add a title or notes and try again.')
-    end
-
-    @log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-    response = AsksClaude.new(ctx.queue.dir, instructions_file: @instructions_file).call(prompt)
-    ctx.with(response: response)
-  end
-end
-
-# Marks the captured message as processed
-# Only clears pending if no newer messages arrived
-#
-class MarkProcessedStep
-  def initialize(store:)
-    @store = store
-  end
-
-  def call(ctx)
-    @store.mark_processed(ctx.queue, ctx.message.received_at)
-    ctx
-  end
-end
-
-# Appends Claude's response to the Things note
-#
-class AppendResponseStep
-  def initialize(things:)
-    @things = things
-  end
-
-  def call(ctx)
-    @things.append_note(ctx.queue.id, ctx.response)
-    ctx
-  end
-end
-
-# Updates Things to show "Ready" tag
-#
-class SetReadyTagStep
-  def initialize(things:)
-    @things = things
-  end
-
-  def call(ctx)
-    @things.set_ready_tag(ctx.queue.id, ctx.to_do.tags)
-    ctx
-  end
-end
-
 # Processes a single queue through Claude
 #
-# Captures the message at the start so we know exactly what we processed.
-# If newer messages arrive during processing, pending marker stays.
+# Simple flow: compute state, broadcast state.
+# No pipeline, no steps - just clear, linear code.
 #
 class ProcessesQueue
   attr_reader :queue, :store, :things, :daemon_log, :instructions_file
@@ -648,22 +560,7 @@ class ProcessesQueue
     end
 
     begin
-      message = queue.latest_message  # capture NOW, before processing
-      unless message
-        daemon_log.write('skip', "#{queue.id} - no messages")
-        return
-      end
-
-      to_do = ToDo.from_message(message)
-
-      daemon_log.write('start', "#{queue.id} - processing #{message.received_at}")
-      queue_log.write('daemon', "Started processing message #{message.received_at}")
-
-      ctx = ProcessingContext.new(queue: queue, message: message, to_do: to_do)
-      pipeline.call(ctx)
-
-      queue_log.write('daemon', 'Completed')
-      daemon_log.write('done', queue.id)
+      process
     ensure
       lock.release
     end
@@ -671,18 +568,43 @@ class ProcessesQueue
 
   private
 
-  def queue_log
-    @queue_log ||= Log.new(queue.log_file)
+  def process
+    message = queue.latest_message
+    unless message
+      daemon_log.write('skip', "#{queue.id} - no messages")
+      return
+    end
+
+    to_do = ToDo.from_message(message)
+    daemon_log.write('start', "#{queue.id} - processing #{message.received_at}")
+    queue_log.write('daemon', "Started processing message #{message.received_at}")
+
+    # Broadcast "working" state
+    things.update(queue.id, to_do.marked_working)
+
+    # Ask Claude
+    prompt = BuildsPrompt.new(to_do).call
+    response = if prompt.strip.empty?
+                 queue_log.write('daemon', 'Skipped: no content to process')
+                 'Nothing to process - add a title or notes and try again.'
+               else
+                 queue_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
+                 AsksClaude.new(queue.dir, instructions_file: instructions_file).call(prompt)
+               end
+
+    # Compute final state and broadcast
+    completed = to_do.with_response(response)
+    things.update(queue.id, completed)
+
+    # Mark processed (clears pending if caught up)
+    store.mark_processed(queue, message.received_at)
+
+    queue_log.write('daemon', 'Completed')
+    daemon_log.write('done', queue.id)
   end
 
-  def pipeline
-    Pipeline.new([
-      SetWorkingTagStep.new(things: things),
-      AskClaudeStep.new(log: queue_log, instructions_file: instructions_file),
-      MarkProcessedStep.new(store: store),
-      AppendResponseStep.new(things: things),
-      SetReadyTagStep.new(things: things)
-    ])
+  def queue_log
+    @queue_log ||= Log.new(queue.log_file)
   end
 end
 
