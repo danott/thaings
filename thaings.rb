@@ -238,7 +238,6 @@ class Queue
   # Paths (no I/O, just path construction)
   def messages_dir = dir / 'messages'
   def processed_file = dir / 'processed'
-  def log_file = dir / 'queue.log'
 end
 
 # Manages queues on disk with pending markers for fast lookup
@@ -407,10 +406,8 @@ class ReceivesThingsToDo
   def call
     return unless input.to_do?
 
-    queue = store.write_message(input.id, input.data)
-
-    log.write('receive', "#{input.id} - #{input.title}")
-    Log.new(queue.log_file).write('receive', 'Message received from Things')
+    store.write_message(input.id, input.data)
+    log.write(input.id, "received: #{input.title}")
   end
 end
 
@@ -493,22 +490,21 @@ end
 # Processes a single queue through Claude
 #
 # Simple flow: compute state, broadcast state.
-# No pipeline, no steps - just clear, linear code.
 #
 class ProcessesQueue
-  attr_reader :queue, :store, :things, :daemon_log, :instructions_file
+  attr_reader :queue, :store, :things, :log, :claude
 
-  def initialize(queue, store:, things:, daemon_log:, instructions_file:)
+  def initialize(queue, store:, things:, log:, claude:)
     @queue = queue
     @store = store
     @things = things
-    @daemon_log = daemon_log
-    @instructions_file = instructions_file
+    @log = log
+    @claude = claude
   end
 
   def call
     acquired = Lock.new(queue.dir / '.lock').with_lock { process }
-    daemon_log.write('skip', "#{queue.id} - already locked") unless acquired
+    log.write(queue.id, 'locked - skipping') unless acquired
   end
 
   private
@@ -516,40 +512,28 @@ class ProcessesQueue
   def process
     message = queue.latest_message
     unless message
-      daemon_log.write('skip', "#{queue.id} - no messages")
+      log.write(queue.id, 'no messages - skipping')
       return
     end
 
     to_do = ToDo.from_message(message)
-    daemon_log.write('start', "#{queue.id} - processing #{message.received_at}")
-    queue_log.write('daemon', "Started processing message #{message.received_at}")
+    log.write(queue.id, "processing #{message.received_at}")
 
-    # Broadcast "working" state
     things.update(queue.id, to_do.marked_working)
 
-    # Ask Claude
-    prompt = to_do.prompt
-    response = if prompt.strip.empty?
-                 queue_log.write('daemon', 'Skipped: no content to process')
+    response = if to_do.prompt.strip.empty?
+                 log.write(queue.id, 'empty prompt - skipping claude')
                  'Nothing to process - add a title or notes and try again.'
                else
-                 queue_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-                 AsksClaude.new(dir: queue.dir, instructions_file: instructions_file).call(prompt)
+                 log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
+                 claude.call(to_do.prompt)
                end
 
-    # Compute final state and broadcast
     completed = to_do.with_response(response)
     things.update(queue.id, completed)
 
-    # Mark processed (clears pending if caught up)
     store.mark_processed(queue, message.received_at)
-
-    queue_log.write('daemon', 'Completed')
-    daemon_log.write('done', queue.id)
-  end
-
-  def queue_log
-    @queue_log ||= Log.new(queue.log_file)
+    log.write(queue.id, 'done')
   end
 end
 
@@ -566,30 +550,25 @@ class RespondsToThingsToDo
   end
 
   def call
-    log.write('wake', 'Daemon triggered')
+    log.write('daemon', 'triggered')
 
     ids = store.pending_ids
 
     if ids.empty?
-      log.write('idle', 'No pending queues')
+      log.write('daemon', 'no pending queues')
       return
     end
 
-    log.write('found', "#{ids.length} pending queue(s)")
+    log.write('daemon', "found #{ids.length} pending")
 
     ids.each do |id|
       queue = store.find(id)
       next unless queue
 
-      ProcessesQueue.new(
-        queue,
-        store: store,
-        things: things,
-        daemon_log: log,
-        instructions_file: instructions_file
-      ).call
+      claude = AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
+      ProcessesQueue.new(queue, store: store, things: things, log: log, claude: claude).call
     end
 
-    log.write('exit', 'Daemon finished')
+    log.write('daemon', 'finished')
   end
 end
