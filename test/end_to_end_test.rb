@@ -114,10 +114,6 @@ class EndToEndTest < Minitest::Test
     input = ThingsInput.new(things_json(id: 'test123', title: 'Process me'))
     ReceivesThingsToDo.new(input, store: store, log: log).call
 
-    # Verify it's processable
-    queue = store.find('test123')
-    assert queue.processable?, 'Queue should be processable'
-
     # Verify pending IDs include our queue
     ids = store.pending_ids
     assert_includes ids, 'test123'
@@ -220,10 +216,6 @@ class EndToEndTest < Minitest::Test
 
     # Verify pending marker is cleared
     refute config.pending_dir.join('abc').exist?, 'Pending marker should be cleared'
-
-    # Verify queue is no longer processable
-    reloaded = store.find('abc')
-    refute reloaded.processable?
   end
 
   def test_new_message_during_processing_keeps_pending
@@ -248,9 +240,8 @@ class EndToEndTest < Minitest::Test
     # Pending marker should STILL exist (because Second > First)
     assert config.pending_dir.join('race').exist?, 'Pending marker should remain'
 
-    # Queue should still be processable
+    # Latest message is the second one
     reloaded = store.find('race')
-    assert reloaded.processable?, 'Queue should still be processable'
     assert_equal 'Second', reloaded.latest_message.title
   end
 

@@ -223,10 +223,6 @@ class Queue
     @processed_at = processed_at
   end
 
-  def processable?
-    latest_message_at && latest_message_at > processed_at
-  end
-
   def latest_message
     messages.last
   end
