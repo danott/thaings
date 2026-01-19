@@ -23,30 +23,34 @@ require 'uri'
 #     log/
 #
 class ThaingsConfig
+  attr_reader :root
+
   def initialize(root: Pathname(Dir.home) / '.thaings')
     @root = Pathname(root)
   end
 
-  def pending_dir = @root / 'pending'
-  def queues_dir = @root / 'queues'
-  def log_dir = @root / 'log'
+  def pending_dir = root / 'pending'
+  def queues_dir = root / 'queues'
+  def log_dir = root / 'log'
   def daemon_log = log_dir / 'daemon.log'
   def receive_log = log_dir / 'receive.log'
-  def env_file = @root / '.env'
-  def instructions_file = @root / 'to-do-instructions.txt'
+  def env_file = root / '.env'
+  def instructions_file = root / 'to-do-instructions.txt'
 end
 
 # Loads environment variables from a file
 #
 class LoadsEnv
+  attr_reader :path
+
   def initialize(path)
     @path = Pathname(path)
   end
 
   def call
-    return unless @path.exist?
+    return unless path.exist?
 
-    @path.readlines
+    path.readlines
       .map(&:strip)
       .reject { |line| line.empty? || line.start_with?('#') }
       .map { |line| line.split('=', 2) }
@@ -58,14 +62,16 @@ end
 # Append-only log writer
 #
 class Log
+  attr_reader :logger
+
   def initialize(path)
     FileUtils.mkdir_p(File.dirname(path))
     @logger = Logger.new(path)
-    @logger.formatter = proc { |_, time, _, msg| "#{time.utc.iso8601} #{msg}\n" }
+    logger.formatter = proc { |_, time, _, msg| "#{time.utc.iso8601} #{msg}\n" }
   end
 
   def write(tag, message)
-    @logger.info { "[#{tag}] #{message}" }
+    logger.info { "[#{tag}] #{message}" }
   end
 end
 
@@ -78,13 +84,15 @@ end
 # File-based exclusive lock with block form
 #
 class Lock
+  attr_reader :path
+
   def initialize(path)
     @path = path
   end
 
   def with_lock
-    FileUtils.mkdir_p(File.dirname(@path))
-    file = File.open(@path, File::RDWR | File::CREAT)
+    FileUtils.mkdir_p(File.dirname(path))
+    file = File.open(path, File::RDWR | File::CREAT)
     return false unless file.flock(File::LOCK_EX | File::LOCK_NB)
 
     begin
@@ -223,21 +231,23 @@ end
 #   queues/{id}/processed           - timestamp of last processed
 #
 class QueueStore
+  attr_reader :config
+
   def initialize(config:)
     @config = config
   end
 
   # Find pending queue IDs - O(k) where k = pending count
   def pending_ids
-    return [] unless @config.pending_dir.exist?
+    return [] unless config.pending_dir.exist?
 
-    @config.pending_dir.glob('*').map { |p| p.basename.to_s }
+    config.pending_dir.glob('*').map { |p| p.basename.to_s }
   end
 
   # Load a queue snapshot by ID
   def find(id)
     validate_id!(id)
-    dir = @config.queues_dir / id
+    dir = config.queues_dir / id
     return nil unless dir.exist?
 
     load_queue(id, dir)
@@ -247,7 +257,7 @@ class QueueStore
   def write_message(id, data, at: Time.now.utc)
     validate_id!(id)
 
-    dir = @config.queues_dir / id
+    dir = config.queues_dir / id
     messages_dir = dir / 'messages'
     messages_dir.mkpath
 
@@ -296,7 +306,7 @@ class QueueStore
   end
 
   def read_latest_message_at(id)
-    dir = @config.queues_dir / id
+    dir = config.queues_dir / id
     messages_dir = dir / 'messages'
     return nil unless messages_dir.exist?
 
@@ -305,12 +315,12 @@ class QueueStore
   end
 
   def touch_pending(id)
-    @config.pending_dir.mkpath
-    FileUtils.touch(@config.pending_dir / id)
+    config.pending_dir.mkpath
+    FileUtils.touch(config.pending_dir / id)
   end
 
   def clear_pending(id)
-    marker = @config.pending_dir / id
+    marker = config.pending_dir / id
     marker.delete if marker.exist?
   end
 
@@ -345,6 +355,8 @@ end
 # Receives a Things to-do, writes message file, marks pending
 #
 class ReceivesThingsToDo
+  attr_reader :input, :store, :log
+
   def initialize(input, store:, log:)
     @input = input
     @store = store
@@ -352,10 +364,10 @@ class ReceivesThingsToDo
   end
 
   def call
-    return unless @input.to_do?
+    return unless input.to_do?
 
-    @store.write_message(@input.id, @input.data)
-    @log.write(@input.id, "received: #{@input.title}")
+    store.write_message(input.id, input.data)
+    log.write(input.id, "received: #{input.title}")
   end
 end
 
@@ -365,6 +377,8 @@ class AsksClaude
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
   MAX_TURNS = 10
   TIMEOUT_SECONDS = 300
+
+  attr_reader :dir, :instructions_file
 
   def initialize(dir:, instructions_file:)
     @dir = dir
@@ -392,10 +406,10 @@ class AsksClaude
         '--continue',
         '--print',
         '--max-turns', MAX_TURNS.to_s,
-        '--append-system-prompt-file', @instructions_file.to_s,
+        '--append-system-prompt-file', instructions_file.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
-        chdir: @dir.to_s
+        chdir: dir.to_s
       )
       [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
     end
@@ -440,6 +454,8 @@ end
 # Simple flow: compute state, broadcast state.
 #
 class ProcessesQueue
+  attr_reader :queue, :store, :things, :log, :claude
+
   def initialize(queue, store:, things:, log:, claude:)
     @queue = queue
     @store = store
@@ -449,43 +465,45 @@ class ProcessesQueue
   end
 
   def call
-    acquired = Lock.new(@queue.dir / '.lock').with_lock { process }
-    @log.write(@queue.id, 'locked - skipping') unless acquired
+    acquired = Lock.new(queue.dir / '.lock').with_lock { process }
+    log.write(queue.id, 'locked - skipping') unless acquired
   end
 
   private
 
   def process
-    message = @queue.latest_message
+    message = queue.latest_message
     unless message
-      @log.write(@queue.id, 'no messages - skipping')
+      log.write(queue.id, 'no messages - skipping')
       return
     end
 
     to_do = ToDo.from_message(message)
-    @log.write(@queue.id, "processing #{message.received_at}")
+    log.write(queue.id, "processing #{message.received_at}")
 
-    @things.update(@queue.id, to_do.marked_working)
+    things.update(queue.id, to_do.marked_working)
 
     response = if to_do.prompt.strip.empty?
-                 @log.write(@queue.id, 'empty prompt - skipping claude')
+                 log.write(queue.id, 'empty prompt - skipping claude')
                  'Nothing to process - add a title or notes and try again.'
                else
-                 @log.write(@queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
-                 @claude.call(to_do.prompt)
+                 log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
+                 claude.call(to_do.prompt)
                end
 
     completed = to_do.with_response(response)
-    @things.update(@queue.id, completed)
+    things.update(queue.id, completed)
 
-    @store.mark_processed(@queue, message.received_at)
-    @log.write(@queue.id, 'done')
+    store.mark_processed(queue, message.received_at)
+    log.write(queue.id, 'done')
   end
 end
 
 # Entry point: wakes, finds pending queues, processes them
 #
 class RespondsToThingsToDo
+  attr_reader :store, :log, :things, :instructions_file
+
   def initialize(store:, log:, things:, instructions_file:)
     @store = store
     @log = log
@@ -494,25 +512,25 @@ class RespondsToThingsToDo
   end
 
   def call
-    @log.write('daemon', 'triggered')
+    log.write('daemon', 'triggered')
 
-    ids = @store.pending_ids
+    ids = store.pending_ids
 
     if ids.empty?
-      @log.write('daemon', 'no pending queues')
+      log.write('daemon', 'no pending queues')
       return
     end
 
-    @log.write('daemon', "found #{ids.length} pending")
+    log.write('daemon', "found #{ids.length} pending")
 
     ids.each do |id|
-      queue = @store.find(id)
+      queue = store.find(id)
       next unless queue
 
-      claude = AsksClaude.new(dir: queue.dir, instructions_file: @instructions_file)
-      ProcessesQueue.new(queue, store: @store, things: @things, log: @log, claude: claude).call
+      claude = AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
+      ProcessesQueue.new(queue, store: store, things: things, log: log, claude: claude).call
     end
 
-    @log.write('daemon', 'finished')
+    log.write('daemon', 'finished')
   end
 end
