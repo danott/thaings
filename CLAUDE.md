@@ -12,7 +12,7 @@ thaings is a macOS integration between Things (task management app) and Claude C
 Things App
     ↓ (Automation sends JSON via stdin)
 receives-things-to-dos
-    ↓ (Creates to-do in ~/.thaings/to-dos/{id}/to-do.json)
+    ↓ (Creates message in to-dos/{id}/messages/{timestamp}.json)
 LaunchAgent watches to-dos/
     ↓ (Triggers on filesystem change)
 responds-to-things-to-dos
@@ -38,12 +38,14 @@ To-dos use two tags to indicate whose turn it is:
 - `Working` - Agent's turn (pending/working)
 - `Ready` - Human's turn (ready for review)
 
-To-do state is stored in `~/.thaings/to-dos/{id}/to-do.json`:
-```json
-{
-  "state": { "status": "pending|working|review", ... },
-  "props": [{ "received_at": "...", "data": { "Title": "...", "Notes": "..." } }]
-}
+To-do state is stored in the filesystem:
+```
+to-dos/{id}/
+  messages/
+    {timestamp}.json    # Raw data from Things (Title, Notes, Tags, etc.)
+  processed             # Timestamp of last processed message
+pending/
+  {id}                  # Marker file - presence means work is needed
 ```
 
 ## LaunchAgent Management
@@ -61,10 +63,9 @@ launchctl list | grep thaings
 
 ## Logs
 
-- `~/.thaings/log/daemon.log` - Main daemon activity
-- `~/.thaings/log/receive.log` - Incoming to-do receipts
-- `~/.thaings/log/daemon.stdout.log` / `daemon.stderr.log` - LaunchAgent output
-- `~/.thaings/to-dos/{id}/to-do.log` - Per-to-do processing log
+- `log/daemon.log` - Main daemon activity
+- `log/receive.log` - Incoming to-do receipts
+- `log/daemon.stdout.log` / `daemon.stderr.log` - LaunchAgent output
 
 ## Testing
 
