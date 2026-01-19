@@ -140,63 +140,7 @@ class Lock
   end
 end
 
-# A to-do's lifecycle state (immutable value object)
-#
-# States: pending, working, review
-#
-# Transitions:
-#   pending              → working (picked up for processing)
-#   working              → review  (Claude responded)
-#   review + new_props   → working (user continues conversation)
-#
-class ToDoState
-  attr_reader :status, :received_at, :started_at, :completed_at, :props_processed
-
-  def initialize(data)
-    @status = data['status']
-    @received_at = data['received_at']
-    @started_at = data['started_at']
-    @completed_at = data['completed_at']
-    @props_processed = data['props_processed'] || 0
-  end
-
-  def with(status: nil, started_at: nil, completed_at: nil, props_processed: nil)
-    ToDoState.new(
-      'status' => status || self.status,
-      'received_at' => received_at,
-      'started_at' => started_at || self.started_at,
-      'completed_at' => completed_at || self.completed_at,
-      'props_processed' => props_processed || self.props_processed
-    )
-  end
-
-  def processable?(props_count)
-    pending? || (review? && has_new_props?(props_count))
-  end
-
-  def pending?
-    status == 'pending'
-  end
-
-  def working?
-    status == 'working'
-  end
-
-  def review?
-    status == 'review'
-  end
-
-  private
-
-  def has_new_props?(props_count)
-    props_count > props_processed
-  end
-end
-
 # Validates a to-do ID to prevent path traversal attacks
-#
-# Usage:
-#   ValidatesId.new(id).call  # => id (or raises)
 #
 class ValidatesId
   PATTERN = /\A[A-Za-z0-9_-]+\z/
@@ -211,7 +155,6 @@ class ValidatesId
 
   def call
     raise Invalid, "Invalid to-do ID: #{id.inspect}" unless valid?
-
     id
   end
 
@@ -222,72 +165,109 @@ class ValidatesId
   end
 end
 
-# Simple data object for a to-do
+# A to-do (immutable value object)
 #
-# Just holds data. Use ToDoStore for persistence.
+# States: pending, working, review
+#
+# Transitions:
+#   pending                  → working (picked up for processing)
+#   working                  → review  (Claude responded)
+#   review + new messages    → working (user continues conversation)
 #
 class ToDo
-  attr_reader :id, :dir, :state, :props
+  attr_reader :id, :dir, :status, :received_at, :started_at, :completed_at,
+              :messages_processed, :messages
 
-  def initialize(id:, dir:, state:, props:)
+  def initialize(id:, dir:, status:, received_at:, started_at: nil,
+                 completed_at: nil, messages_processed: 0, messages: [])
     @id = id
     @dir = dir
-    @state = state
-    @props = props
+    @status = status
+    @received_at = received_at
+    @started_at = started_at
+    @completed_at = completed_at
+    @messages_processed = messages_processed
+    @messages = messages.freeze
   end
 
-  # --- Queries ---
+  # --- State transitions (return new ToDo) ---
+
+  def marked_working(at: Time.now.utc.iso8601)
+    ToDo.new(
+      id: id, dir: dir, status: 'working', received_at: received_at,
+      started_at: at, completed_at: completed_at,
+      messages_processed: messages_processed, messages: messages
+    )
+  end
+
+  def marked_review(at: Time.now.utc.iso8601)
+    ToDo.new(
+      id: id, dir: dir, status: 'review', received_at: received_at,
+      started_at: started_at, completed_at: at,
+      messages_processed: messages.length, messages: messages
+    )
+  end
+
+  def with_message(data, at: Time.now.utc.iso8601)
+    new_message = { 'received_at' => at, 'data' => data }
+    ToDo.new(
+      id: id, dir: dir, status: status, received_at: received_at,
+      started_at: started_at, completed_at: completed_at,
+      messages_processed: messages_processed, messages: messages + [new_message]
+    )
+  end
+
+  # --- Status queries ---
+
+  def pending? = status == 'pending'
+  def working? = status == 'working'
+  def review? = status == 'review'
 
   def processable?
-    state.processable?(props_count)
+    pending? || (review? && has_new_messages?)
   end
 
-  def props_count
-    props.length
-  end
+  # --- Message queries ---
 
-  def received_at
-    state.received_at
-  end
-
-  def latest_props
-    props.last&.dig('data') || {}
+  def latest_message
+    messages.last&.dig('data') || {}
   end
 
   def title
-    latest_props['Title']
+    latest_message['Title']
   end
 
   def notes
-    latest_props['Notes'] || ''
+    latest_message['Notes'] || ''
   end
 
   def checklist
-    latest_props['Checklist Items']
+    latest_message['Checklist Items']
   end
 
   def tags
-    tags_str = latest_props['Tags'] || ''
+    tags_str = latest_message['Tags'] || ''
     tags_str.split(',').map(&:strip).reject(&:empty?)
   end
 
   # --- Paths ---
 
-  def to_do_file
-    dir / 'to-do.json'
-  end
+  def to_do_file = dir / 'to-do.json'
+  def log_file = dir / 'to-do.log'
 
-  def log_file
-    dir / 'to-do.log'
+  private
+
+  def has_new_messages?
+    messages.length > messages_processed
   end
 end
 
-# Handles reading/writing to-dos to disk
+# Reads and writes to-dos to disk
 #
 # Usage:
 #   store = ToDoStore.new
 #   to_do = store.find_or_create('abc123')
-#   store.append_props(to_do, data)
+#   to_do = to_do.with_message(data)
 #   store.save(to_do)
 #
 class ToDoStore
@@ -304,20 +284,24 @@ class ToDoStore
     return nil unless path.exist?
 
     data = JSON.parse(path.read(encoding: 'UTF-8'))
-    build_to_do(id, dir, data)
+    from_hash(id, dir, data)
   end
 
-  def find_or_create(id)
-    find(id) || create(id)
+  def find_or_create(id, at: Time.now.utc.iso8601)
+    find(id) || create(id, at: at)
   end
 
-  def create(id)
+  def create(id, at: Time.now.utc.iso8601)
     ValidatesId.new(id).call
     dir = root_dir / id
     dir.mkpath
 
-    data = empty_to_do_data
-    build_to_do(id, dir, data)
+    ToDo.new(
+      id: id,
+      dir: dir,
+      status: 'pending',
+      received_at: at
+    )
   end
 
   def all_ids
@@ -329,78 +313,33 @@ class ToDoStore
   end
 
   def save(to_do)
-    data = to_hash(to_do)
-    json = JSON.pretty_generate(data)
+    json = JSON.pretty_generate(to_hash(to_do))
     File.write(to_do.to_do_file, json, encoding: 'UTF-8')
-  end
-
-  def append_props(to_do, new_data)
-    new_props = to_do.props + [{
-      'received_at' => Time.now.utc.iso8601,
-      'data' => new_data
-    }]
-
-    ToDo.new(
-      id: to_do.id,
-      dir: to_do.dir,
-      state: to_do.state,
-      props: new_props
-    )
-  end
-
-  def mark_working(to_do)
-    new_state = to_do.state.with(
-      status: 'working',
-      started_at: Time.now.utc.iso8601
-    )
-
-    ToDo.new(id: to_do.id, dir: to_do.dir, state: new_state, props: to_do.props)
-  end
-
-  def mark_review(to_do)
-    new_state = to_do.state.with(
-      status: 'review',
-      completed_at: Time.now.utc.iso8601,
-      props_processed: to_do.props_count
-    )
-
-    ToDo.new(id: to_do.id, dir: to_do.dir, state: new_state, props: to_do.props)
   end
 
   private
 
-  def build_to_do(id, dir, data)
+  def from_hash(id, dir, data)
     ToDo.new(
       id: id,
       dir: dir,
-      state: ToDoState.new(data['state']),
-      props: data['props'] || []
+      status: data['status'],
+      received_at: data['received_at'],
+      started_at: data['started_at'],
+      completed_at: data['completed_at'],
+      messages_processed: data['messages_processed'] || 0,
+      messages: data['messages'] || []
     )
-  end
-
-  def empty_to_do_data
-    {
-      'state' => {
-        'status' => 'pending',
-        'received_at' => Time.now.utc.iso8601,
-        'started_at' => nil,
-        'completed_at' => nil,
-        'props_processed' => 0
-      },
-      'props' => []
-    }
   end
 
   def to_hash(to_do)
     {
-      'state' => {
-        'status' => to_do.state.status,
-        'received_at' => to_do.state.received_at,
-        'started_at' => to_do.state.started_at,
-        'completed_at' => to_do.state.completed_at,
-        'props_processed' => to_do.state.props_processed
-      },
-      'props' => to_do.props
+      'status' => to_do.status,
+      'received_at' => to_do.received_at,
+      'started_at' => to_do.started_at,
+      'completed_at' => to_do.completed_at,
+      'messages_processed' => to_do.messages_processed,
+      'messages' => to_do.messages
     }
   end
 end
@@ -509,11 +448,11 @@ class ReceivesThingsToDo
     return unless input.to_do?
 
     to_do = store.find_or_create(input.id)
-    to_do = store.append_props(to_do, input.data)
+    to_do = to_do.with_message(input.data)
     store.save(to_do)
 
     log.write('receive', "#{input.id} - #{input.title}")
-    Log.new(to_do.log_file).write('receive', 'Props received from Things')
+    Log.new(to_do.log_file).write('receive', 'Message received from Things')
   end
 end
 
@@ -673,7 +612,7 @@ class MarkWorkingStep
   end
 
   def call(ctx)
-    working = @store.mark_working(ctx.to_do)
+    working = ctx.to_do.marked_working
     @store.save(working)
     ctx.with(to_do: working)
   end
@@ -721,7 +660,7 @@ class MarkReviewStep
   end
 
   def call(ctx)
-    review = @store.mark_review(ctx.to_do)
+    review = ctx.to_do.marked_review
     @store.save(review)
     ctx.with(to_do: review)
   end
