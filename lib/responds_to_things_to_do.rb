@@ -3,7 +3,8 @@
 require_relative '../thaings'
 
 # Wire dependencies at the edge
-config = ThaingsConfig.new
+root = Pathname(__FILE__).dirname.parent.expand_path
+config = ThaingsConfig.new(root: root)
 LoadsEnv.new(config.env_file).call
 
 store = QueueStore.new(config: config)

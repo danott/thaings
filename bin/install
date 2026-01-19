@@ -12,7 +12,7 @@ require "uri"
 #
 
 HOME_DIR = Pathname(Dir.home)
-THAINGS_ROOT = HOME_DIR / ".thaings"
+THAINGS_ROOT = Pathname(__FILE__).dirname.parent.expand_path
 PLIST_TEMPLATE = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist.example"
 PLIST_GENERATED = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist"
 PLIST_DEST = HOME_DIR / "Library" / "LaunchAgents" / "com.thaings.daemon.plist"
@@ -93,14 +93,14 @@ def install
 
   # Generate plist from template
   puts "Generating LaunchAgent plist..."
-  plist_content = PLIST_TEMPLATE.read.gsub("__HOME__", HOME_DIR.to_s)
+  plist_content = PLIST_TEMPLATE.read.gsub("__THAINGS_ROOT__", THAINGS_ROOT.to_s)
   PLIST_GENERATED.write(plist_content)
 
   # Load daemon
   puts "Loading daemon..."
-  warn "Warning: Failed to create symlink" unless system("ln", "-sf", PLIST_GENERATED, PLIST_DEST)
-  system("launchctl", "unload", PLIST_DEST, err: File::NULL) # May fail if not loaded, that's OK
-  warn "Warning: Failed to load LaunchAgent" unless system("launchctl", "load", PLIST_DEST)
+  warn "Warning: Failed to create symlink" unless system("ln", "-sf", PLIST_GENERATED.to_s, PLIST_DEST.to_s)
+  system("launchctl", "unload", PLIST_DEST.to_s, err: File::NULL) # May fail if not loaded, that's OK
+  warn "Warning: Failed to load LaunchAgent" unless system("launchctl", "load", PLIST_DEST.to_s)
   puts
 
   # Create to-do in Things

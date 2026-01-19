@@ -7,19 +7,19 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/bin:/usr/bin</string>
     </dict>
     <key>ProgramArguments</key>
     <array>
-        <string>__HOME__/.thaings/bin/responds-to-things-to-dos</string>
+        <string>__THAINGS_ROOT__/bin/responds-to-things-to-dos</string>
     </array>
     <key>WatchPaths</key>
     <array>
-        <string>__HOME__/.thaings/to-dos</string>
+        <string>__THAINGS_ROOT__/to-dos</string>
     </array>
     <key>StandardOutPath</key>
-    <string>__HOME__/.thaings/log/daemon.stdout.log</string>
+    <string>__THAINGS_ROOT__/log/daemon.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/.thaings/log/daemon.stderr.log</string>
+    <string>__THAINGS_ROOT__/log/daemon.stderr.log</string>
 </dict>
 </plist>
