@@ -23,19 +23,17 @@ require 'uri'
 #     log/
 #
 class ThaingsConfig
-  attr_reader :root
-
   def initialize(root: Pathname(Dir.home) / '.thaings')
     @root = Pathname(root)
   end
 
-  def pending_dir = root / 'pending'
-  def queues_dir = root / 'queues'
-  def log_dir = root / 'log'
+  def pending_dir = @root / 'pending'
+  def queues_dir = @root / 'queues'
+  def log_dir = @root / 'log'
   def daemon_log = log_dir / 'daemon.log'
   def receive_log = log_dir / 'receive.log'
-  def env_file = root / '.env'
-  def instructions_file = root / 'to-do-instructions.txt'
+  def env_file = @root / '.env'
+  def instructions_file = @root / 'to-do-instructions.txt'
 end
 
 # Loads environment variables from a file
@@ -347,8 +345,6 @@ end
 # Receives a Things to-do, writes message file, marks pending
 #
 class ReceivesThingsToDo
-  attr_reader :input, :store, :log
-
   def initialize(input, store:, log:)
     @input = input
     @store = store
@@ -356,10 +352,10 @@ class ReceivesThingsToDo
   end
 
   def call
-    return unless input.to_do?
+    return unless @input.to_do?
 
-    store.write_message(input.id, input.data)
-    log.write(input.id, "received: #{input.title}")
+    @store.write_message(@input.id, @input.data)
+    @log.write(@input.id, "received: #{@input.title}")
   end
 end
 
@@ -444,8 +440,6 @@ end
 # Simple flow: compute state, broadcast state.
 #
 class ProcessesQueue
-  attr_reader :queue, :store, :things, :log, :claude
-
   def initialize(queue, store:, things:, log:, claude:)
     @queue = queue
     @store = store
@@ -455,45 +449,43 @@ class ProcessesQueue
   end
 
   def call
-    acquired = Lock.new(queue.dir / '.lock').with_lock { process }
-    log.write(queue.id, 'locked - skipping') unless acquired
+    acquired = Lock.new(@queue.dir / '.lock').with_lock { process }
+    @log.write(@queue.id, 'locked - skipping') unless acquired
   end
 
   private
 
   def process
-    message = queue.latest_message
+    message = @queue.latest_message
     unless message
-      log.write(queue.id, 'no messages - skipping')
+      @log.write(@queue.id, 'no messages - skipping')
       return
     end
 
     to_do = ToDo.from_message(message)
-    log.write(queue.id, "processing #{message.received_at}")
+    @log.write(@queue.id, "processing #{message.received_at}")
 
-    things.update(queue.id, to_do.marked_working)
+    @things.update(@queue.id, to_do.marked_working)
 
     response = if to_do.prompt.strip.empty?
-                 log.write(queue.id, 'empty prompt - skipping claude')
+                 @log.write(@queue.id, 'empty prompt - skipping claude')
                  'Nothing to process - add a title or notes and try again.'
                else
-                 log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
-                 claude.call(to_do.prompt)
+                 @log.write(@queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
+                 @claude.call(to_do.prompt)
                end
 
     completed = to_do.with_response(response)
-    things.update(queue.id, completed)
+    @things.update(@queue.id, completed)
 
-    store.mark_processed(queue, message.received_at)
-    log.write(queue.id, 'done')
+    @store.mark_processed(@queue, message.received_at)
+    @log.write(@queue.id, 'done')
   end
 end
 
 # Entry point: wakes, finds pending queues, processes them
 #
 class RespondsToThingsToDo
-  attr_reader :store, :log, :things, :instructions_file
-
   def initialize(store:, log:, things:, instructions_file:)
     @store = store
     @log = log
@@ -502,25 +494,25 @@ class RespondsToThingsToDo
   end
 
   def call
-    log.write('daemon', 'triggered')
+    @log.write('daemon', 'triggered')
 
-    ids = store.pending_ids
+    ids = @store.pending_ids
 
     if ids.empty?
-      log.write('daemon', 'no pending queues')
+      @log.write('daemon', 'no pending queues')
       return
     end
 
-    log.write('daemon', "found #{ids.length} pending")
+    @log.write('daemon', "found #{ids.length} pending")
 
     ids.each do |id|
-      queue = store.find(id)
+      queue = @store.find(id)
       next unless queue
 
-      claude = AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
-      ProcessesQueue.new(queue, store: store, things: things, log: log, claude: claude).call
+      claude = AsksClaude.new(dir: queue.dir, instructions_file: @instructions_file)
+      ProcessesQueue.new(queue, store: @store, things: @things, log: @log, claude: claude).call
     end
 
-    log.write('daemon', 'finished')
+    @log.write('daemon', 'finished')
   end
 end
