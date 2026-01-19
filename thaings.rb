@@ -506,11 +506,10 @@ class UpdatesThings
   class UpdateFailed < StandardError; end
 
   def update(id, to_do)
-    params = {}
-    params['notes'] = to_do.notes if to_do.workflow_tag == 'Ready'
-    params['tags'] = to_do.final_tags.join(',') if to_do.workflow_tag
-
-    open_url(id, params) unless params.empty?
+    open_url(id, {
+      'notes' => to_do.notes,
+      'tags' => to_do.final_tags.join(',')
+    })
   end
 
   private
