@@ -159,12 +159,12 @@ class Message
     @data = data.freeze
   end
 
-  def title = data["Title"]
-  def notes = data["Notes"] || ""
-  def checklist = data["Checklist Items"]
+  def title = data.fetch("Title")
+  def notes = data.fetch("Notes", "")
+  def checklist = data.fetch("Checklist Items", nil)
 
   def tags
-    tags_str = data["Tags"] || ""
+    tags_str = data.fetch("Tags", "")
     tags_str.split(",").map(&:strip).reject(&:empty?)
   end
 end
@@ -384,23 +384,24 @@ class ThingsInput
     raise InvalidInput, "Invalid JSON: #{e.message}"
   end
 
+  attr_reader :data
+
   def id
-    value = @data["ID"]
+    value = data.fetch("ID", nil)
     raise InvalidInput, "Missing ID field" if value.nil? || value.empty?
 
     value
   end
 
   def validate_has_content!
-    title = @data["Title"].to_s.strip
-    return unless title.empty?
+    title_value = data.fetch("Title", "").to_s.strip
+    return unless title_value.empty?
 
     raise InvalidInput, "To-do is missing a title"
   end
 
-  def data = @data
-  def title = @data["Title"] || "(no title)"
-  def to_do? = @data["Type"] == "To-Do"
+  def title = data.fetch("Title", "(no title)")
+  def to_do? = data.fetch("Type", nil) == "To-Do"
 end
 
 # Receives a Things to-do, writes message file, adds to queue

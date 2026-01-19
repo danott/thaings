@@ -68,6 +68,13 @@ launchctl list | grep thaings
 - `log/receive.log` - Incoming to-do receipts
 - `log/daemon.stdout.log` / `daemon.stderr.log` - LaunchAgent output
 
+## Ruby Style
+
+- Use `hash.fetch('key')` instead of `hash['key']` — missing values should cause explicit failures, not silent nils
+- Use `hash.fetch('key', default)` when a default is appropriate
+- Never reference instance variables (`@var`) outside of `initialize` — use `attr_reader` and call the method instead
+- Assign instance variables only in `initialize`, then interact through the reader methods
+
 ## Testing
 
 ### Automated Tests
