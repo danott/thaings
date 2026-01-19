@@ -11,13 +11,16 @@ require 'uri'
 
 # Encapsulates all thaings paths in one place
 #
-# Usage:
-#   config = ThaingsConfig.new  # uses ~/.thaings
-#   config = ThaingsConfig.new(root: '/tmp/test')  # for testing
-#
-#   config.to_dos_dir    # => Pathname
-#   config.log_dir       # => Pathname
-#   config.daemon_log    # => Pathname
+# Directory structure:
+#   ~/.thaings/
+#     pending/           # marker files - presence = has work
+#       {id}
+#     queues/
+#       {id}/
+#         messages/
+#           {timestamp}.json
+#         processed      # timestamp of last processed message
+#     log/
 #
 class ThaingsConfig
   attr_reader :root
@@ -26,7 +29,8 @@ class ThaingsConfig
     @root = Pathname(root)
   end
 
-  def to_dos_dir = root / 'to-dos'
+  def pending_dir = root / 'pending'
+  def queues_dir = root / 'queues'
   def log_dir = root / 'log'
   def daemon_log = log_dir / 'daemon.log'
   def receive_log = log_dir / 'receive.log'
@@ -35,9 +39,6 @@ class ThaingsConfig
 end
 
 # Loads environment variables from a file
-#
-# Usage:
-#   LoadsEnv.new(config.env_file).call
 #
 class LoadsEnv
   attr_reader :path
@@ -68,21 +69,12 @@ THAINGS_CONFIG = ThaingsConfig.new
 
 # Append-only log writer backed by stdlib Logger
 #
-# Usage:
-#   log = Log.new('path/to/file.log')
-#   log.write('tag', 'message')
-#   # => "2024-01-17T12:00:00Z [tag] message\n"
-#
-# Benefits over raw File.write:
-#   - Thread-safe writes
-#   - Automatic file handle management
-#
 class Log
-  attr_reader :logger
-  attr_reader :path
+  attr_reader :logger, :path
 
   def initialize(path)
     @path = path
+    FileUtils.mkdir_p(File.dirname(path))
     @logger = Logger.new(path)
     logger.formatter = method(:format_line)
   end
@@ -98,25 +90,13 @@ class Log
   end
 end
 
-# Null object for Log - useful for testing or when you don't want output
+# Null object for Log
 #
 class NullLog
   def write(_tag, _message) = nil
 end
 
 # File-based exclusive lock with explicit acquire/release
-#
-# Usage:
-#   lock = Lock.new('/path/to/.lock')
-#   if lock.acquire
-#     begin
-#       do_work
-#     ensure
-#       lock.release
-#     end
-#   else
-#     puts "Already locked"
-#   end
 #
 class Lock
   attr_reader :path
@@ -127,6 +107,7 @@ class Lock
   end
 
   def acquire
+    FileUtils.mkdir_p(File.dirname(path))
     @file = File.open(path, File::RDWR | File::CREAT)
     @file.flock(File::LOCK_EX | File::LOCK_NB)
   end
@@ -165,203 +146,175 @@ class ValidatesId
   end
 end
 
-# A to-do (immutable value object)
+# Immutable snapshot from Things
 #
-# Minimal state: just messages and how many we've processed.
-# Status is derived: processable when messages.length > messages_processed.
+# What we received at a point in time.
 #
-# "Working" state is ephemeral (only in memory during pipeline execution).
-# This avoids stuck to-dos if the daemon crashes mid-processing.
+class Message
+  attr_reader :received_at, :data
+
+  def initialize(received_at:, data:)
+    @received_at = received_at
+    @data = data.freeze
+  end
+
+  def title = data['Title']
+  def notes = data['Notes'] || ''
+  def checklist = data['Checklist Items']
+
+  def tags
+    tags_str = data['Tags'] || ''
+    tags_str.split(',').map(&:strip).reject(&:empty?)
+  end
+end
+
+# The content to process (derived from a Message)
+#
+# Just the stuff we need to build a prompt.
 #
 class ToDo
-  attr_reader :id, :dir, :messages_processed, :messages
+  attr_reader :title, :notes, :tags, :checklist
 
-  def initialize(id:, dir:, messages_processed: 0, messages: [])
+  def initialize(title:, notes:, tags:, checklist:)
+    @title = title
+    @notes = notes
+    @tags = tags
+    @checklist = checklist
+  end
+
+  def self.from_message(message)
+    new(
+      title: message.title,
+      notes: message.notes,
+      tags: message.tags,
+      checklist: message.checklist
+    )
+  end
+end
+
+# Processing state for one to-do ID
+#
+# Tracks messages received and what's been processed.
+# Reads from filesystem - not a pure value object.
+#
+class Queue
+  attr_reader :id, :dir
+
+  def initialize(id:, dir:)
     @id = id
     @dir = dir
-    @messages_processed = messages_processed
-    @messages = messages.freeze
   end
-
-  # --- Transitions (return new ToDo) ---
-
-  def with_message(data, at: Time.now.utc.iso8601)
-    new_message = { 'received_at' => at, 'data' => data }
-    ToDo.new(
-      id: id, dir: dir,
-      messages_processed: messages_processed,
-      messages: messages + [new_message]
-    )
-  end
-
-  def marked_processed
-    ToDo.new(
-      id: id, dir: dir,
-      messages_processed: messages.length,
-      messages: messages
-    )
-  end
-
-  # --- Queries ---
 
   def processable?
-    messages.length > messages_processed
+    latest_message_at && latest_message_at > processed_at
+  end
+
+  def latest_message_at
+    message_files.last&.basename('.json')&.to_s
+  end
+
+  def processed_at
+    processed_file.exist? ? processed_file.read.strip : ''
   end
 
   def latest_message
-    messages.last&.dig('data') || {}
+    file = message_files.last
+    return nil unless file
+
+    data = JSON.parse(file.read(encoding: 'UTF-8'))
+    Message.new(received_at: file.basename('.json').to_s, data: data)
   end
 
-  def first_received_at
-    messages.first&.dig('received_at')
+  def to_do
+    msg = latest_message
+    msg ? ToDo.from_message(msg) : nil
   end
 
-  def title
-    latest_message['Title']
+  # Paths
+  def messages_dir = dir / 'messages'
+  def processed_file = dir / 'processed'
+  def log_file = dir / 'queue.log'
+
+  private
+
+  def message_files
+    return [] unless messages_dir.exist?
+
+    messages_dir.glob('*.json').sort_by(&:basename)
   end
-
-  def notes
-    latest_message['Notes'] || ''
-  end
-
-  def checklist
-    latest_message['Checklist Items']
-  end
-
-  def tags
-    tags_str = latest_message['Tags'] || ''
-    tags_str.split(',').map(&:strip).reject(&:empty?)
-  end
-
-  # --- Paths ---
-
-  def to_do_file = dir / 'to-do.json'
-  def log_file = dir / 'to-do.log'
 end
 
-# Reads and writes to-dos to disk
+# Manages queues on disk with pending markers for fast lookup
 #
-# JSON format:
-#   { "messages_processed": 1, "messages": [...] }
+# Storage:
+#   pending/{id}                    - marker file (presence = has work)
+#   queues/{id}/messages/{ts}.json  - individual messages
+#   queues/{id}/processed           - timestamp of last processed
 #
-# Usage:
-#   store = ToDoStore.new
-#   to_do = store.find_or_create('abc123')
-#   to_do = to_do.with_message(data)
-#   store.save(to_do)
-#
-class ToDoStore
-  attr_reader :root_dir
+class QueueStore
+  attr_reader :config
 
-  def initialize(root_dir: THAINGS_CONFIG.to_dos_dir)
-    @root_dir = root_dir
+  def initialize(config: THAINGS_CONFIG)
+    @config = config
   end
 
+  # Find pending queue IDs - O(k) where k = pending count
+  def pending_ids
+    return [] unless config.pending_dir.exist?
+
+    config.pending_dir.glob('*').map { |p| p.basename.to_s }
+  end
+
+  # Load a queue by ID
   def find(id)
     ValidatesId.new(id).call
-    dir = root_dir / id
-    path = dir / 'to-do.json'
-    return nil unless path.exist?
+    dir = config.queues_dir / id
+    return nil unless dir.exist?
 
-    data = JSON.parse(path.read(encoding: 'UTF-8'))
-    from_hash(id, dir, data)
+    Queue.new(id: id, dir: dir)
   end
 
-  def find_or_create(id)
-    find(id) || create(id)
-  end
-
-  def create(id)
+  # Write a new message and mark as pending
+  def write_message(id, data, at: Time.now.utc)
     ValidatesId.new(id).call
-    dir = root_dir / id
-    dir.mkpath
 
-    ToDo.new(id: id, dir: dir)
+    dir = config.queues_dir / id
+    messages_dir = dir / 'messages'
+    messages_dir.mkpath
+
+    timestamp = format_timestamp(at)
+    file = messages_dir / "#{timestamp}.json"
+    file.write(JSON.pretty_generate(data), encoding: 'UTF-8')
+
+    touch_pending(id)
+
+    Queue.new(id: id, dir: dir)
   end
 
-  def all_ids
-    return [] unless root_dir.exist?
-
-    root_dir.glob('*/to-do.json').map do |path|
-      path.dirname.basename.to_s
-    end
-  end
-
-  def save(to_do)
-    json = JSON.pretty_generate(to_hash(to_do))
-    File.write(to_do.to_do_file, json, encoding: 'UTF-8')
+  # Mark a queue as processed (removes pending marker)
+  def mark_processed(queue)
+    queue.processed_file.write(queue.latest_message_at)
+    clear_pending(queue.id)
   end
 
   private
 
-  def from_hash(id, dir, data)
-    ToDo.new(
-      id: id,
-      dir: dir,
-      messages_processed: data['messages_processed'] || 0,
-      messages: data['messages'] || []
-    )
+  def touch_pending(id)
+    config.pending_dir.mkpath
+    FileUtils.touch(config.pending_dir / id)
   end
 
-  def to_hash(to_do)
-    {
-      'messages_processed' => to_do.messages_processed,
-      'messages' => to_do.messages
-    }
-  end
-end
-
-# Immutable context that flows through a processing pipeline
-#
-# Carries the to-do plus any intermediate results (like Claude's response).
-# Each step can return a new context with updated values.
-#
-# Usage:
-#   ctx = ProcessingContext.new(to_do: to_do)
-#   ctx = ctx.with(response: "Hello from Claude")
-#   ctx.response  # => "Hello from Claude"
-#
-class ProcessingContext
-  attr_reader :to_do, :response
-
-  def initialize(to_do:, response: nil)
-    @to_do = to_do
-    @response = response
+  def clear_pending(id)
+    marker = config.pending_dir / id
+    marker.delete if marker.exist?
   end
 
-  def with(to_do: nil, response: nil)
-    ProcessingContext.new(
-      to_do: to_do || self.to_do,
-      response: response || self.response
-    )
-  end
-end
-
-# Runs a series of steps, threading a context through each
-#
-# Each step must respond to #call(context) and return a context.
-# Steps are simple objects - easy to test in isolation.
-#
-# Usage:
-#   pipeline = Pipeline.new([StepA.new, StepB.new])
-#   result = pipeline.call(initial_context)
-#
-class Pipeline
-  attr_reader :steps
-
-  def initialize(steps)
-    @steps = steps
-  end
-
-  def call(context)
-    steps.reduce(context) { |ctx, step| step.call(ctx) }
+  def format_timestamp(time)
+    time.utc.strftime('%Y-%m-%dT%H-%M-%S-%6NZ')
   end
 end
 
 # Parses and validates input from Things
-#
-# Raises on invalid input instead of calling exit.
-# Let the caller decide how to handle errors.
 #
 class ThingsInput
   class InvalidInput < StandardError; end
@@ -400,12 +353,12 @@ class ThingsInput
   end
 end
 
-# Receives a Things to-do via stdin JSON, creates/updates to-do state
+# Receives a Things to-do, writes message file, marks pending
 #
 class ReceivesThingsToDo
   attr_reader :input, :store, :log
 
-  def initialize(input, store: ToDoStore.new, log: Log.new(THAINGS_CONFIG.receive_log))
+  def initialize(input, store: QueueStore.new, log: Log.new(THAINGS_CONFIG.receive_log))
     @input = input
     @store = store
     @log = log
@@ -414,30 +367,10 @@ class ReceivesThingsToDo
   def call
     return unless input.to_do?
 
-    to_do = store.find_or_create(input.id)
-    to_do = to_do.with_message(input.data)
-    store.save(to_do)
+    queue = store.write_message(input.id, input.data)
 
     log.write('receive', "#{input.id} - #{input.title}")
-    Log.new(to_do.log_file).write('receive', 'Message received from Things')
-  end
-end
-
-# Finds processable to-dos
-#
-class FindsProcessableToDos
-  attr_reader :store
-
-  def initialize(store: ToDoStore.new)
-    @store = store
-  end
-
-  def call
-    store.all_ids
-      .map { |id| store.find(id) }
-      .compact
-      .select(&:processable?)
-      .sort_by { |t| t.first_received_at || '' }
+    Log.new(queue.log_file).write('receive', 'Message received from Things')
   end
 end
 
@@ -467,19 +400,15 @@ end
 
 # Asks Claude to respond to a prompt
 #
-# Uses two safeguards:
-# - --max-turns: graceful exit at turn boundaries (prevents runaway loops)
-# - Timeout: hard ceiling on wall-clock time (prevents hung processes)
-#
 class AsksClaude
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
-  MAX_TURNS = 10 # Enough for moderate research; may need adjustment based on real-world usage
-  TIMEOUT_SECONDS = 300 # 5 minutes
+  MAX_TURNS = 10
+  TIMEOUT_SECONDS = 300
 
-  attr_reader :to_do_dir, :instructions_file
+  attr_reader :queue_dir, :instructions_file
 
-  def initialize(to_do_dir, instructions_file: THAINGS_CONFIG.instructions_file)
-    @to_do_dir = to_do_dir
+  def initialize(queue_dir, instructions_file: THAINGS_CONFIG.instructions_file)
+    @queue_dir = queue_dir
     @instructions_file = instructions_file
   end
 
@@ -507,7 +436,7 @@ class AsksClaude
         '--append-system-prompt-file', instructions_file.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
-        chdir: to_do_dir.to_s
+        chdir: queue_dir.to_s
       )
       [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
     end
@@ -515,8 +444,6 @@ class AsksClaude
 end
 
 # Updates Things app via URL scheme
-#
-# Knows about Things-specific concepts like tags for workflow states.
 #
 class UpdatesThings
   TAG_WORKING = 'Working'
@@ -527,7 +454,6 @@ class UpdatesThings
 
   def append_note(id, text)
     note = "\n\n---\n\n#{text}\n\n***\n\n"
-
     open_url(id, 'append-notes' => note)
   end
 
@@ -566,10 +492,41 @@ class UpdatesThings
   end
 end
 
-# --- Pipeline Steps ---
+# Immutable context that flows through a processing pipeline
 #
-# Each step transforms a ProcessingContext.
-# Simple objects, easy to test in isolation.
+class ProcessingContext
+  attr_reader :queue, :to_do, :response
+
+  def initialize(queue:, to_do:, response: nil)
+    @queue = queue
+    @to_do = to_do
+    @response = response
+  end
+
+  def with(response: nil)
+    ProcessingContext.new(
+      queue: queue,
+      to_do: to_do,
+      response: response || self.response
+    )
+  end
+end
+
+# Runs a series of steps, threading a context through each
+#
+class Pipeline
+  attr_reader :steps
+
+  def initialize(steps)
+    @steps = steps
+  end
+
+  def call(context)
+    steps.reduce(context) { |ctx, step| step.call(ctx) }
+  end
+end
+
+# --- Pipeline Steps ---
 
 # Updates Things to show "Working" tag
 #
@@ -579,7 +536,7 @@ class SetWorkingTagStep
   end
 
   def call(ctx)
-    @things.set_working_tag(ctx.to_do.id, ctx.to_do.tags)
+    @things.set_working_tag(ctx.queue.id, ctx.to_do.tags)
     ctx
   end
 end
@@ -600,12 +557,12 @@ class AskClaudeStep
     end
 
     @log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-    response = AsksClaude.new(ctx.to_do.dir).call(prompt)
+    response = AsksClaude.new(ctx.queue.dir).call(prompt)
     ctx.with(response: response)
   end
 end
 
-# Marks all messages as processed and persists
+# Marks queue as processed (writes timestamp, clears pending marker)
 #
 class MarkProcessedStep
   def initialize(store:)
@@ -613,9 +570,8 @@ class MarkProcessedStep
   end
 
   def call(ctx)
-    processed = ctx.to_do.marked_processed
-    @store.save(processed)
-    ctx.with(to_do: processed)
+    @store.mark_processed(ctx.queue)
+    ctx
   end
 end
 
@@ -627,7 +583,7 @@ class AppendResponseStep
   end
 
   def call(ctx)
-    @things.append_note(ctx.to_do.id, ctx.response)
+    @things.append_note(ctx.queue.id, ctx.response)
     ctx
   end
 end
@@ -640,42 +596,47 @@ class SetReadyTagStep
   end
 
   def call(ctx)
-    @things.set_ready_tag(ctx.to_do.id, ctx.to_do.tags)
+    @things.set_ready_tag(ctx.queue.id, ctx.to_do.tags)
     ctx
   end
 end
 
-# Processes a single to-do through Claude
+# Processes a single queue through Claude
 #
-# Lock wraps the pipeline (not a step in it).
-# If locked, we skip. Otherwise, run all steps.
-#
-class ProcessesToDo
-  attr_reader :to_do, :store, :things, :daemon_log
+class ProcessesQueue
+  attr_reader :queue, :store, :things, :daemon_log
 
-  def initialize(to_do, store: ToDoStore.new, things: UpdatesThings.new, daemon_log: Log.new(THAINGS_CONFIG.daemon_log))
-    @to_do = to_do
+  def initialize(queue, store: QueueStore.new, things: UpdatesThings.new,
+                 daemon_log: Log.new(THAINGS_CONFIG.daemon_log))
+    @queue = queue
     @store = store
     @things = things
     @daemon_log = daemon_log
   end
 
   def call
-    lock = Lock.new(to_do.dir / '.lock')
+    lock = Lock.new(queue.dir / '.lock')
 
     unless lock.acquire
-      daemon_log.write('skip', "#{to_do.id} - already locked")
+      daemon_log.write('skip', "#{queue.id} - already locked")
       return
     end
 
     begin
-      daemon_log.write('start', "#{to_do.id} - processing")
-      to_do_log.write('daemon', 'Started processing')
+      to_do = queue.to_do
+      unless to_do
+        daemon_log.write('skip', "#{queue.id} - no messages")
+        return
+      end
 
-      pipeline.call(ProcessingContext.new(to_do: to_do))
+      daemon_log.write('start', "#{queue.id} - processing")
+      queue_log.write('daemon', 'Started processing')
 
-      to_do_log.write('daemon', 'Completed')
-      daemon_log.write('done', to_do.id)
+      ctx = ProcessingContext.new(queue: queue, to_do: to_do)
+      pipeline.call(ctx)
+
+      queue_log.write('daemon', 'Completed')
+      daemon_log.write('done', queue.id)
     ensure
       lock.release
     end
@@ -683,14 +644,14 @@ class ProcessesToDo
 
   private
 
-  def to_do_log
-    @to_do_log ||= Log.new(to_do.log_file)
+  def queue_log
+    @queue_log ||= Log.new(queue.log_file)
   end
 
   def pipeline
     Pipeline.new([
       SetWorkingTagStep.new(things: things),
-      AskClaudeStep.new(log: to_do_log),
+      AskClaudeStep.new(log: queue_log),
       MarkProcessedStep.new(store: store),
       AppendResponseStep.new(things: things),
       SetReadyTagStep.new(things: things)
@@ -698,28 +659,32 @@ class ProcessesToDo
   end
 end
 
-# Entry point: wakes, finds processable to-dos, processes them
+# Entry point: wakes, finds pending queues, processes them
 #
 class RespondsToThingsToDo
-  attr_reader :log
+  attr_reader :store, :log
 
-  def initialize(log: Log.new(THAINGS_CONFIG.daemon_log))
+  def initialize(store: QueueStore.new, log: Log.new(THAINGS_CONFIG.daemon_log))
+    @store = store
     @log = log
   end
 
   def call
     log.write('wake', 'Daemon triggered')
 
-    to_dos = FindsProcessableToDos.new.call
+    ids = store.pending_ids
 
-    if to_dos.empty?
-      log.write('idle', 'No to-dos to process')
+    if ids.empty?
+      log.write('idle', 'No pending queues')
       return
     end
 
-    log.write('found', "#{to_dos.length} to-do(s) to process")
+    log.write('found', "#{ids.length} pending queue(s)")
 
-    to_dos.each { |to_do| ProcessesToDo.new(to_do).call }
+    ids.each do |id|
+      queue = store.find(id)
+      ProcessesQueue.new(queue).call if queue
+    end
 
     log.write('exit', 'Daemon finished')
   end
