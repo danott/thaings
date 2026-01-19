@@ -363,3 +363,102 @@ class EndToEndTest < Minitest::Test
     assert queue, "Should accept to-do with only title"
   end
 end
+
+class LoadsEnvTest < Minitest::Test
+  def setup
+    @tmpdir = Pathname(Dir.mktmpdir("env-test"))
+    @env_file = @tmpdir / ".env"
+    @original_env = ENV.to_h
+  end
+
+  def teardown
+    # Restore original ENV
+    ENV.clear
+    @original_env.each { |k, v| ENV[k] = v }
+    FileUtils.rm_rf(@tmpdir)
+  end
+
+  def test_basic_key_value
+    @env_file.write("FOO=bar\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+  end
+
+  def test_value_with_equals_sign
+    @env_file.write("DATABASE_URL=postgres://host:5432?options=foo=bar\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "postgres://host:5432?options=foo=bar", ENV["DATABASE_URL"]
+  end
+
+  def test_double_quoted_value
+    @env_file.write('FOO="hello world"' + "\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "hello world", ENV["FOO"]
+  end
+
+  def test_single_quoted_value
+    @env_file.write("FOO='hello world'\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "hello world", ENV["FOO"]
+  end
+
+  def test_quoted_value_with_equals
+    @env_file.write('URL="https://example.com?a=1&b=2"' + "\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "https://example.com?a=1&b=2", ENV["URL"]
+  end
+
+  def test_export_prefix
+    @env_file.write("export FOO=bar\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+  end
+
+  def test_export_with_quoted_value
+    @env_file.write('export SECRET="my secret value"' + "\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "my secret value", ENV["SECRET"]
+  end
+
+  def test_inline_comment
+    @env_file.write("FOO=bar # this is a comment\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+  end
+
+  def test_quoted_value_preserves_hash
+    @env_file.write('FOO="bar # not a comment"' + "\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar # not a comment", ENV["FOO"]
+  end
+
+  def test_ignores_comment_lines
+    @env_file.write("# This is a comment\nFOO=bar\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+  end
+
+  def test_ignores_empty_lines
+    @env_file.write("\nFOO=bar\n\nBAZ=qux\n")
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+    assert_equal "qux", ENV["BAZ"]
+  end
+
+  def test_handles_missing_file
+    missing = @tmpdir / "nonexistent"
+    LoadsEnv.new(missing).call # Should not raise
+  end
+
+  def test_multiple_variables
+    @env_file.write(<<~ENV)
+      FOO=bar
+      export BAZ="quoted value"
+      SIMPLE=123 # with comment
+    ENV
+    LoadsEnv.new(@env_file).call
+    assert_equal "bar", ENV["FOO"]
+    assert_equal "quoted value", ENV["BAZ"]
+    assert_equal "123", ENV["SIMPLE"]
+  end
+end

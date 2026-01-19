@@ -39,6 +39,13 @@ end
 
 # Loads environment variables from a file
 #
+# Handles standard .env conventions:
+#   - Comments (lines starting with #)
+#   - export prefix (export FOO=bar)
+#   - Quoted values (FOO="bar" or FOO='bar')
+#   - Inline comments (FOO=bar # comment) - only outside quotes
+#   - Values containing equals signs (FOO=a=b=c)
+#
 class LoadsEnv
   attr_reader :path
 
@@ -53,9 +60,44 @@ class LoadsEnv
       .readlines
       .map(&:strip)
       .reject { |line| line.empty? || line.start_with?("#") }
-      .map { |line| line.split("=", 2) }
-      .select { |parts| parts.length == 2 }
-      .each { |key, value| ENV[key] = value }
+      .each { |line| parse_and_set(line) }
+  end
+
+  private
+
+  def parse_and_set(line)
+    # Handle export prefix
+    line = line.sub(/\Aexport\s+/, "")
+
+    # Split on first =
+    key, value = line.split("=", 2)
+    return unless key && value
+
+    key = key.strip
+    return if key.empty?
+
+    ENV[key] = parse_value(value)
+  end
+
+  def parse_value(value)
+    value = value.strip
+
+    # Handle double-quoted values
+    return extract_quoted(value, '"') if value.start_with?('"')
+
+    # Handle single-quoted values
+    return extract_quoted(value, "'") if value.start_with?("'")
+
+    # Unquoted: strip inline comments
+    value.sub(/\s+#.*\z/, "")
+  end
+
+  def extract_quoted(value, quote)
+    # Find the closing quote
+    end_index = value.index(quote, 1)
+    return value unless end_index
+
+    value[1...end_index]
   end
 end
 
@@ -562,7 +604,10 @@ class RespondsToThingsToDo
     end
 
     if failed.any?
-      log.write("daemon", "finished with #{failed.length} FAILED: #{failed.join(", ")}")
+      log.write(
+        "daemon",
+        "finished with #{failed.length} FAILED: #{failed.join(", ")}"
+      )
     else
       log.write("daemon", "finished")
     end
