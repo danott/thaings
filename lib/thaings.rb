@@ -483,7 +483,9 @@ class ProcessesQueue
   end
 
   def call
-    Lock.new(queue.dir / ".lock").with_lock { process }
+    locked = Lock.new(queue.dir / ".lock").with_lock { process }
+    log.write(queue.id, "SKIPPED: lock held by another process") unless locked
+    locked
   end
 
   private
@@ -535,21 +537,34 @@ class RespondsToThingsToDo
 
     log.write("daemon", "found #{ids.length} queued")
 
+    failed = []
+
     ids.each do |id|
       queue = store.find(id)
       next unless queue
 
       claude =
         AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
-      ProcessesQueue.new(
-        queue,
-        store: store,
-        things: things,
-        log: log,
-        claude: claude
-      ).call
+
+      begin
+        ProcessesQueue.new(
+          queue,
+          store: store,
+          things: things,
+          log: log,
+          claude: claude
+        ).call
+      rescue => e
+        log.write(id, "UNEXPECTED ERROR: #{e.class}: #{e.message}")
+        log.write(id, "  #{e.backtrace.first(3).join("\n  ")}")
+        failed << id
+      end
     end
 
-    log.write("daemon", "finished")
+    if failed.any?
+      log.write("daemon", "finished with #{failed.length} FAILED: #{failed.join(", ")}")
+    else
+      log.write("daemon", "finished")
+    end
   end
 end
