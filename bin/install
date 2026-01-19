@@ -114,7 +114,6 @@ def install
   unless system("open", "-g", "things:///json?data=#{encoded}")
     warn "Warning: Failed to open Things"
   end
-  system("open", "-g", "things:///inbox")
   puts "Visit your Things Inbox to finish setting up Thaings."
 end
 
