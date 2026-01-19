@@ -14,6 +14,7 @@ whether to mark it complete or continue the conversation.
 - macOS
 - [Things](https://culturedcode.com/things/)
 - [Claude Code](https://claude.ai/code)
+- Ruby 3.0+ (via [rbenv](https://github.com/rbenv/rbenv))
 
 ## Installation
 

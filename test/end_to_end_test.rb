@@ -41,7 +41,7 @@ module TestHelpers
 
     # Create required directories
     @config.pending_dir.mkpath
-    @config.queues_dir.mkpath
+    @config.to_dos_dir.mkpath
     @config.log_dir.mkpath
 
     # Create a minimal instructions file

@@ -15,7 +15,7 @@ require 'uri'
 #   ~/.thaings/
 #     pending/           # marker files - presence = has work
 #       {id}
-#     queues/
+#     to-dos/
 #       {id}/
 #         messages/
 #           {timestamp}.json
@@ -30,7 +30,7 @@ class ThaingsConfig
   end
 
   def pending_dir = root / 'pending'
-  def queues_dir = root / 'queues'
+  def to_dos_dir = root / 'to-dos'
   def log_dir = root / 'log'
   def daemon_log = log_dir / 'daemon.log'
   def receive_log = log_dir / 'receive.log'
@@ -50,7 +50,7 @@ class LoadsEnv
   def call
     return unless path.exist?
 
-    path.readlines
+    path.readlines(encoding: 'UTF-8')
       .map(&:strip)
       .reject { |line| line.empty? || line.start_with?('#') }
       .map { |line| line.split('=', 2) }
@@ -227,8 +227,8 @@ end
 #
 # Storage:
 #   pending/{id}                    - marker file (presence = has work)
-#   queues/{id}/messages/{ts}.json  - individual messages
-#   queues/{id}/processed           - timestamp of last processed
+#   to-dos/{id}/messages/{ts}.json  - individual messages
+#   to-dos/{id}/processed           - timestamp of last processed
 #
 class QueueStore
   attr_reader :config
@@ -247,7 +247,7 @@ class QueueStore
   # Load a queue snapshot by ID
   def find(id)
     validate_id!(id)
-    dir = config.queues_dir / id
+    dir = config.to_dos_dir / id
     return nil unless dir.exist?
 
     load_queue(id, dir)
@@ -257,7 +257,7 @@ class QueueStore
   def write_message(id, data, at: Time.now.utc)
     validate_id!(id)
 
-    dir = config.queues_dir / id
+    dir = config.to_dos_dir / id
     messages_dir = dir / 'messages'
     messages_dir.mkpath
 
@@ -306,7 +306,7 @@ class QueueStore
   end
 
   def read_latest_message_at(id)
-    dir = config.queues_dir / id
+    dir = config.to_dos_dir / id
     messages_dir = dir / 'messages'
     return nil unless messages_dir.exist?
 
