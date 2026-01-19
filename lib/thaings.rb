@@ -12,15 +12,14 @@ require 'uri'
 # Encapsulates all thaings paths in one place
 #
 # Directory structure:
-#   ~/.thaings/
-#     pending/           # marker files - presence = has work
+#   to-dos/
+#     _queue/            # marker files - presence = has work
 #       {id}
-#     to-dos/
-#       {id}/
-#         messages/
-#           {timestamp}.json
-#         processed      # timestamp of last processed message
-#     log/
+#     {id}/
+#       messages/
+#         {timestamp}.json
+#       processed        # timestamp of last processed message
+#   log/
 #
 class ThaingsConfig
   attr_reader :root
@@ -29,8 +28,8 @@ class ThaingsConfig
     @root = Pathname(root)
   end
 
-  def pending_dir = root / 'pending'
   def to_dos_dir = root / 'to-dos'
+  def queue_dir = to_dos_dir / '_queue'
   def log_dir = root / 'log'
   def daemon_log = log_dir / 'daemon.log'
   def receive_log = log_dir / 'receive.log'
@@ -221,12 +220,12 @@ class Queue
   def processed_file = dir / 'processed'
 end
 
-# Manages queues on disk with pending markers for fast lookup
+# Manages queues on disk with markers for fast lookup
 #
 # All filesystem I/O happens here. Queue objects are immutable snapshots.
 #
 # Storage:
-#   pending/{id}                    - marker file (presence = has work)
+#   to-dos/_queue/{id}              - marker file (presence = has work)
 #   to-dos/{id}/messages/{ts}.json  - individual messages
 #   to-dos/{id}/processed           - timestamp of last processed
 #
@@ -237,11 +236,11 @@ class QueueStore
     @config = config
   end
 
-  # Find pending queue IDs - O(k) where k = pending count
-  def pending_ids
-    return [] unless config.pending_dir.exist?
+  # Find queued IDs - O(k) where k = queue size
+  def queued_ids
+    return [] unless config.queue_dir.exist?
 
-    config.pending_dir.glob('*').map { |p| p.basename.to_s }
+    config.queue_dir.glob('*').map { |p| p.basename.to_s }
   end
 
   # Load a queue snapshot by ID
@@ -253,7 +252,7 @@ class QueueStore
     load_queue(id, dir)
   end
 
-  # Write a new message and mark as pending
+  # Write a new message and add to queue
   def write_message(id, data, at: Time.now.utc)
     validate_id!(id)
 
@@ -265,19 +264,19 @@ class QueueStore
     file = messages_dir / "#{timestamp}.json"
     file.write(JSON.pretty_generate(data))
 
-    touch_pending(id)
+    enqueue(id)
 
     load_queue(id, dir)
   end
 
   # Mark a specific message as processed
-  # Only clears pending if no newer messages arrived during processing
+  # Only dequeues if no newer messages arrived during processing
   def mark_processed(queue, timestamp)
     queue.processed_file.write(timestamp)
 
     # Read current state from disk to check if we're caught up
     current_latest = read_latest_message_at(queue.id)
-    clear_pending(queue.id) unless current_latest && current_latest > timestamp
+    dequeue(queue.id) unless current_latest && current_latest > timestamp
   end
 
   private
@@ -314,13 +313,13 @@ class QueueStore
     files.last&.basename('.json')&.to_s
   end
 
-  def touch_pending(id)
-    config.pending_dir.mkpath
-    FileUtils.touch(config.pending_dir / id)
+  def enqueue(id)
+    config.queue_dir.mkpath
+    FileUtils.touch(config.queue_dir / id)
   end
 
-  def clear_pending(id)
-    marker = config.pending_dir / id
+  def dequeue(id)
+    marker = config.queue_dir / id
     marker.delete if marker.exist?
   end
 
@@ -352,7 +351,7 @@ class ThingsInput
   def to_do? = @data['Type'] == 'To-Do'
 end
 
-# Receives a Things to-do, writes message file, marks pending
+# Receives a Things to-do, writes message file, adds to queue
 #
 class ReceivesThingsToDo
   attr_reader :input, :store, :log
@@ -498,7 +497,7 @@ class ProcessesQueue
   end
 end
 
-# Entry point: wakes, finds pending queues, processes them
+# Entry point: wakes, finds queued to-dos, processes them
 #
 class RespondsToThingsToDo
   attr_reader :store, :log, :things, :instructions_file
@@ -513,14 +512,14 @@ class RespondsToThingsToDo
   def call
     log.write('daemon', 'triggered')
 
-    ids = store.pending_ids
+    ids = store.queued_ids
 
     if ids.empty?
-      log.write('daemon', 'no pending queues')
+      log.write('daemon', 'queue empty')
       return
     end
 
-    log.write('daemon', "found #{ids.length} pending")
+    log.write('daemon', "found #{ids.length} queued")
 
     ids.each do |id|
       queue = store.find(id)

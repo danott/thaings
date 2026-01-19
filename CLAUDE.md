@@ -40,12 +40,13 @@ To-dos use two tags to indicate whose turn it is:
 
 To-do state is stored in the filesystem:
 ```
-to-dos/{id}/
-  messages/
-    {timestamp}.json    # Raw data from Things (Title, Notes, Tags, etc.)
-  processed             # Timestamp of last processed message
-pending/
-  {id}                  # Marker file - presence means work is needed
+to-dos/
+  _queue/               # Marker files - presence means work is needed
+    {id}
+  {id}/
+    messages/
+      {timestamp}.json  # Raw data from Things (Title, Notes, Tags, etc.)
+    processed           # Timestamp of last processed message
 ```
 
 ## LaunchAgent Management
