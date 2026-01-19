@@ -346,6 +346,13 @@ class ThingsInput
     value
   end
 
+  def validate_has_content!
+    title = @data["Title"].to_s.strip
+    return unless title.empty?
+
+    raise InvalidInput, "To-do is missing a title"
+  end
+
   def data = @data
   def title = @data["Title"] || "(no title)"
   def to_do? = @data["Type"] == "To-Do"
@@ -365,6 +372,7 @@ class ReceivesThingsToDo
   def call
     return unless input.to_do?
 
+    input.validate_has_content!
     store.write_message(input.id, input.data)
     log.write(input.id, "received: #{input.title}")
   end
@@ -489,14 +497,8 @@ class ProcessesQueue
 
     things.update(queue.id, to_do.marked_working)
 
-    response =
-      if to_do.prompt.strip.empty?
-        log.write(queue.id, "empty prompt - skipping claude")
-        "Nothing to process - add a title or notes and try again."
-      else
-        log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
-        claude.call(to_do.prompt)
-      end
+    log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
+    response = claude.call(to_do.prompt)
 
     completed = to_do.with_response(response)
     things.update(queue.id, completed)

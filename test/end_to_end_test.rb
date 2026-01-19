@@ -319,4 +319,47 @@ class EndToEndTest < Minitest::Test
     assert_nil store.find("proj123")
     assert_empty store.queued_ids
   end
+
+  def test_rejects_todos_without_title
+    store = QueueStore.new(config: config)
+    log = NullLog.new
+
+    input =
+      ThingsInput.new(
+        JSON.generate(
+          {
+            "Type" => "To-Do",
+            "ID" => "empty123",
+            "Title" => "",
+            "Notes" => "Has notes but no title"
+          }
+        )
+      )
+
+    error =
+      assert_raises(ThingsInput::InvalidInput) do
+        ReceivesThingsToDo.new(input, store: store, log: log).call
+      end
+
+    assert_includes error.message, "missing a title"
+    assert_nil store.find("empty123")
+    assert_empty store.queued_ids
+  end
+
+  def test_accepts_todo_with_title_only
+    store = QueueStore.new(config: config)
+    log = NullLog.new
+
+    input =
+      ThingsInput.new(
+        JSON.generate(
+          { "Type" => "To-Do", "ID" => "title123", "Title" => "Just a title" }
+        )
+      )
+
+    ReceivesThingsToDo.new(input, store: store, log: log).call
+
+    queue = store.find("title123")
+    assert queue, "Should accept to-do with only title"
+  end
 end
