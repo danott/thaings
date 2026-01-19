@@ -8,7 +8,6 @@ THAINGS_ROOT="$HOME/.thaings"
 REPO_URL="https://github.com/danott/thaings.git"
 
 echo "Installing Thaings..."
-echo
 
 if [ -d "$THAINGS_ROOT" ]; then
   echo "Updating existing installation..."
@@ -18,5 +17,4 @@ else
   git clone "$REPO_URL" "$THAINGS_ROOT"
 fi
 
-echo
 exec "$THAINGS_ROOT/bin/install"

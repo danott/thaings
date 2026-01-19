@@ -83,7 +83,6 @@ INSTALL_DATA = [
 
 def install
   puts "Setting up Thaings..."
-  puts
 
   # Create .env template if it doesn't exist
   unless ENV_FILE.exist?
@@ -101,14 +100,13 @@ def install
   warn "Warning: Failed to create symlink" unless system("ln", "-sf", PLIST_GENERATED.to_s, PLIST_DEST.to_s)
   system("launchctl", "unload", PLIST_DEST.to_s, err: File::NULL) # May fail if not loaded, that's OK
   warn "Warning: Failed to load LaunchAgent" unless system("launchctl", "load", PLIST_DEST.to_s)
-  puts
 
   # Create to-do in Things
   puts "Creating setup checklist in Things..."
   json = JSON.generate(INSTALL_DATA)
-  encoded = URI.encode_www_form_component(json)
+  encoded = URI.encode_www_form_component(json).gsub("+", "%20")
   warn "Warning: Failed to open Things" unless system("open", "-g", "things:///json?data=#{encoded}")
-  puts
+  system("open", "-g", "things:///inbox")
   puts "Visit your Things Inbox to finish setting up Thaings."
 end
 
