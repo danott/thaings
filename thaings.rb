@@ -64,9 +64,6 @@ class LoadsEnv
   end
 end
 
-# Default config instance
-THAINGS_CONFIG = ThaingsConfig.new
-
 # Append-only log writer backed by stdlib Logger
 #
 class Log
@@ -237,7 +234,7 @@ end
 class QueueStore
   attr_reader :config
 
-  def initialize(config: THAINGS_CONFIG)
+  def initialize(config:)
     @config = config
   end
 
@@ -376,7 +373,7 @@ end
 class ReceivesThingsToDo
   attr_reader :input, :store, :log
 
-  def initialize(input, store: QueueStore.new, log: Log.new(THAINGS_CONFIG.receive_log))
+  def initialize(input, store:, log:)
     @input = input
     @store = store
     @log = log
@@ -425,7 +422,7 @@ class AsksClaude
 
   attr_reader :queue_dir, :instructions_file
 
-  def initialize(queue_dir, instructions_file: THAINGS_CONFIG.instructions_file)
+  def initialize(queue_dir, instructions_file:)
     @queue_dir = queue_dir
     @instructions_file = instructions_file
   end
@@ -567,8 +564,9 @@ end
 # Builds prompt and asks Claude, stores response in context
 #
 class AskClaudeStep
-  def initialize(log:)
+  def initialize(log:, instructions_file:)
     @log = log
+    @instructions_file = instructions_file
   end
 
   def call(ctx)
@@ -580,7 +578,7 @@ class AskClaudeStep
     end
 
     @log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-    response = AsksClaude.new(ctx.queue.dir).call(prompt)
+    response = AsksClaude.new(ctx.queue.dir, instructions_file: @instructions_file).call(prompt)
     ctx.with(response: response)
   end
 end
@@ -631,14 +629,14 @@ end
 # If newer messages arrive during processing, pending marker stays.
 #
 class ProcessesQueue
-  attr_reader :queue, :store, :things, :daemon_log
+  attr_reader :queue, :store, :things, :daemon_log, :instructions_file
 
-  def initialize(queue, store: QueueStore.new, things: UpdatesThings.new,
-                 daemon_log: Log.new(THAINGS_CONFIG.daemon_log))
+  def initialize(queue, store:, things:, daemon_log:, instructions_file:)
     @queue = queue
     @store = store
     @things = things
     @daemon_log = daemon_log
+    @instructions_file = instructions_file
   end
 
   def call
@@ -680,7 +678,7 @@ class ProcessesQueue
   def pipeline
     Pipeline.new([
       SetWorkingTagStep.new(things: things),
-      AskClaudeStep.new(log: queue_log),
+      AskClaudeStep.new(log: queue_log, instructions_file: instructions_file),
       MarkProcessedStep.new(store: store),
       AppendResponseStep.new(things: things),
       SetReadyTagStep.new(things: things)
@@ -691,11 +689,13 @@ end
 # Entry point: wakes, finds pending queues, processes them
 #
 class RespondsToThingsToDo
-  attr_reader :store, :log
+  attr_reader :store, :log, :things, :instructions_file
 
-  def initialize(store: QueueStore.new, log: Log.new(THAINGS_CONFIG.daemon_log))
+  def initialize(store:, log:, things:, instructions_file:)
     @store = store
     @log = log
+    @things = things
+    @instructions_file = instructions_file
   end
 
   def call
@@ -712,7 +712,15 @@ class RespondsToThingsToDo
 
     ids.each do |id|
       queue = store.find(id)
-      ProcessesQueue.new(queue).call if queue
+      next unless queue
+
+      ProcessesQueue.new(
+        queue,
+        store: store,
+        things: things,
+        daemon_log: log,
+        instructions_file: instructions_file
+      ).call
     end
 
     log.write('exit', 'Daemon finished')

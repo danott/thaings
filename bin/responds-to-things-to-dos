@@ -3,5 +3,17 @@
 
 require_relative '../thaings'
 
-LoadsEnv.new(THAINGS_CONFIG.env_file).call
-RespondsToThingsToDo.new.call
+# Wire dependencies at the edge
+config = ThaingsConfig.new
+LoadsEnv.new(config.env_file).call
+
+store = QueueStore.new(config: config)
+log = Log.new(config.daemon_log)
+things = UpdatesThings.new
+
+RespondsToThingsToDo.new(
+  store: store,
+  log: log,
+  things: things,
+  instructions_file: config.instructions_file
+).call
