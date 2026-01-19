@@ -64,26 +64,17 @@ class LoadsEnv
   end
 end
 
-# Append-only log writer backed by stdlib Logger
+# Append-only log writer
 #
 class Log
-  attr_reader :logger, :path
-
   def initialize(path)
-    @path = path
     FileUtils.mkdir_p(File.dirname(path))
     @logger = Logger.new(path)
-    logger.formatter = method(:format_line)
+    @logger.formatter = proc { |_, time, _, msg| "#{time.utc.iso8601} #{msg}\n" }
   end
 
   def write(tag, message)
-    logger.info { "[#{tag}] #{message}" }
-  end
-
-  private
-
-  def format_line(_severity, time, _progname, msg)
-    "#{time.utc.iso8601} #{msg}\n"
+    @logger.info { "[#{tag}] #{message}" }
   end
 end
 
@@ -344,38 +335,22 @@ end
 class ThingsInput
   class InvalidInput < StandardError; end
 
-  attr_reader :raw_input
-
   def initialize(raw_input)
-    @raw_input = raw_input
-  end
-
-  def data
-    @data ||= parse_json
+    @data = JSON.parse(raw_input)
+  rescue JSON::ParserError => e
+    raise InvalidInput, "Invalid JSON: #{e.message}"
   end
 
   def id
-    value = data['ID']
+    value = @data['ID']
     raise InvalidInput, 'Missing ID field' if value.nil? || value.empty?
 
     value
   end
 
-  def title
-    data['Title'] || '(no title)'
-  end
-
-  def to_do?
-    data['Type'] == 'To-Do'
-  end
-
-  private
-
-  def parse_json
-    JSON.parse(raw_input)
-  rescue JSON::ParserError => e
-    raise InvalidInput, "Invalid JSON: #{e.message}"
-  end
+  def data = @data
+  def title = @data['Title'] || '(no title)'
+  def to_do? = @data['Type'] == 'To-Do'
 end
 
 # Receives a Things to-do, writes message file, marks pending
