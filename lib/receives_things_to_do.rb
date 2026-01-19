@@ -8,7 +8,7 @@ store = QueueStore.new(config: config)
 log = Log.new(config.receive_log)
 
 begin
-  raw = $stdin.read.force_encoding('UTF-8').strip
+  raw = $stdin.read.strip
   ReceivesThingsToDo.new(ThingsInput.new(raw), store: store, log: log).call
 rescue ThingsInput::InvalidInput => e
   $stderr.puts e.message

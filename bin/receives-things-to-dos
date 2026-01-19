@@ -1,2 +1,3 @@
 #!/bin/bash
+export LANG=en_US.UTF-8
 exec "$HOME/.rbenv/shims/ruby" "$(dirname "$0")/../lib/receives_things_to_do.rb" "$@"

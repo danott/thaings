@@ -50,7 +50,7 @@ class LoadsEnv
   def call
     return unless path.exist?
 
-    path.readlines(encoding: 'UTF-8')
+    path.readlines
       .map(&:strip)
       .reject { |line| line.empty? || line.start_with?('#') }
       .map { |line| line.split('=', 2) }
@@ -263,7 +263,7 @@ class QueueStore
 
     timestamp = format_timestamp(at)
     file = messages_dir / "#{timestamp}.json"
-    file.write(JSON.pretty_generate(data), encoding: 'UTF-8')
+    file.write(JSON.pretty_generate(data))
 
     touch_pending(id)
 
@@ -300,7 +300,7 @@ class QueueStore
     return [] unless messages_dir.exist?
 
     messages_dir.glob('*.json').sort_by(&:basename).map do |file|
-      data = JSON.parse(file.read(encoding: 'UTF-8'))
+      data = JSON.parse(file.read)
       Message.new(received_at: file.basename('.json').to_s, data: data)
     end
   end
@@ -411,7 +411,7 @@ class AsksClaude
         '-p', prompt,
         chdir: dir.to_s
       )
-      [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
+      [stdout, stderr, status]
     end
   end
 end
