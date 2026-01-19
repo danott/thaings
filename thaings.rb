@@ -93,53 +93,25 @@ class NullLog
   def write(_tag, _message) = nil
 end
 
-# File-based exclusive lock with explicit acquire/release
+# File-based exclusive lock with block form
 #
 class Lock
-  attr_reader :path
-
   def initialize(path)
     @path = path
-    @file = nil
   end
 
-  def acquire
-    FileUtils.mkdir_p(File.dirname(path))
-    @file = File.open(path, File::RDWR | File::CREAT)
-    @file.flock(File::LOCK_EX | File::LOCK_NB)
-  end
+  def with_lock
+    FileUtils.mkdir_p(File.dirname(@path))
+    file = File.open(@path, File::RDWR | File::CREAT)
+    return false unless file.flock(File::LOCK_EX | File::LOCK_NB)
 
-  def release
-    return unless @file
-
-    @file.flock(File::LOCK_UN)
-    @file.close
-    @file = nil
-  end
-end
-
-# Validates a to-do ID to prevent path traversal attacks
-#
-class ValidatesId
-  PATTERN = /\A[A-Za-z0-9_-]+\z/
-
-  class Invalid < ArgumentError; end
-
-  attr_reader :id
-
-  def initialize(id)
-    @id = id
-  end
-
-  def call
-    raise Invalid, "Invalid to-do ID: #{id.inspect}" unless valid?
-    id
-  end
-
-  private
-
-  def valid?
-    id.is_a?(String) && id.match?(PATTERN)
+    begin
+      yield
+    ensure
+      file.flock(File::LOCK_UN)
+      file.close
+    end
+    true
   end
 end
 
@@ -206,6 +178,14 @@ class ToDo
   end
 
   # --- Computed state ---
+
+  def prompt
+    parts = []
+    parts << title if title
+    parts << "\n\n#{notes}" unless notes.empty?
+    parts << "\n\nChecklist:\n#{checklist}" if checklist.is_a?(String) && !checklist.empty?
+    parts.join
+  end
 
   def final_tags
     non_workflow_tags + [workflow_tag].compact
@@ -286,7 +266,7 @@ class QueueStore
 
   # Load a queue snapshot by ID
   def find(id)
-    ValidatesId.new(id).call
+    validate_id!(id)
     dir = config.queues_dir / id
     return nil unless dir.exist?
 
@@ -295,7 +275,7 @@ class QueueStore
 
   # Write a new message and mark as pending
   def write_message(id, data, at: Time.now.utc)
-    ValidatesId.new(id).call
+    validate_id!(id)
 
     dir = config.queues_dir / id
     messages_dir = dir / 'messages'
@@ -321,6 +301,12 @@ class QueueStore
   end
 
   private
+
+  def validate_id!(id)
+    return if id.is_a?(String) && id.match?(/\A[A-Za-z0-9_-]+\z/)
+
+    raise ArgumentError, "Invalid to-do ID: #{id.inspect}"
+  end
 
   def load_queue(id, dir)
     Queue.new(
@@ -428,48 +414,17 @@ class ReceivesThingsToDo
   end
 end
 
-# Builds a prompt from to-do properties
-#
-class BuildsPrompt
-  attr_reader :to_do
-
-  def initialize(to_do)
-    @to_do = to_do
-  end
-
-  def call
-    parts = []
-    parts << to_do.title if to_do.title
-    parts << "\n\n#{to_do.notes}" unless to_do.notes.empty?
-    parts << "\n\nChecklist:\n#{to_do.checklist}" if checklist_present?
-    parts.join
-  end
-
-  private
-
-  def checklist_present?
-    to_do.checklist.is_a?(String) && !to_do.checklist.empty?
-  end
-end
-
 # Asks Claude to respond to a prompt
 #
-class AsksClaude
+module AsksClaude
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
   MAX_TURNS = 10
   TIMEOUT_SECONDS = 300
 
-  attr_reader :queue_dir, :instructions_file
+  def self.call(prompt, dir:, instructions_file:)
+    stdout, stderr, status = run(prompt, dir: dir, instructions_file: instructions_file)
 
-  def initialize(queue_dir, instructions_file:)
-    @queue_dir = queue_dir
-    @instructions_file = instructions_file
-  end
-
-  def call(prompt)
-    stdout, stderr, process = run(prompt)
-
-    if process.success?
+    if status.success?
       stdout
     else
       "Error: Claude execution failed.\n#{stderr}"
@@ -478,9 +433,7 @@ class AsksClaude
     "Error: Claude timed out after #{TIMEOUT_SECONDS} seconds."
   end
 
-  private
-
-  def run(prompt)
+  def self.run(prompt, dir:, instructions_file:)
     Timeout.timeout(TIMEOUT_SECONDS) do
       stdout, stderr, status = Open3.capture3(
         '/opt/homebrew/bin/claude',
@@ -490,11 +443,12 @@ class AsksClaude
         '--append-system-prompt-file', instructions_file.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
-        chdir: queue_dir.to_s
+        chdir: dir.to_s
       )
       [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
     end
   end
+  private_class_method :run
 end
 
 # Broadcasts to-do state to Things app via URL scheme
@@ -547,18 +501,8 @@ class ProcessesQueue
   end
 
   def call
-    lock = Lock.new(queue.dir / '.lock')
-
-    unless lock.acquire
-      daemon_log.write('skip', "#{queue.id} - already locked")
-      return
-    end
-
-    begin
-      process
-    ensure
-      lock.release
-    end
+    acquired = Lock.new(queue.dir / '.lock').with_lock { process }
+    daemon_log.write('skip', "#{queue.id} - already locked") unless acquired
   end
 
   private
@@ -578,13 +522,13 @@ class ProcessesQueue
     things.update(queue.id, to_do.marked_working)
 
     # Ask Claude
-    prompt = BuildsPrompt.new(to_do).call
+    prompt = to_do.prompt
     response = if prompt.strip.empty?
                  queue_log.write('daemon', 'Skipped: no content to process')
                  'Nothing to process - add a title or notes and try again.'
                else
                  queue_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-                 AsksClaude.new(queue.dir, instructions_file: instructions_file).call(prompt)
+                 AsksClaude.call(prompt, dir: queue.dir, instructions_file: instructions_file)
                end
 
     # Compute final state and broadcast

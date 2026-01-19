@@ -201,7 +201,7 @@ class EndToEndTest < Minitest::Test
     assert_equal 'abc', things.working_updates.first[:id]
 
     # 2. Build prompt
-    prompt = BuildsPrompt.new(to_do).call
+    prompt = to_do.prompt
     assert_includes prompt, 'Help me'
     assert_includes prompt, 'With this task'
 
@@ -286,7 +286,7 @@ class EndToEndTest < Minitest::Test
 
     bad_input = ThingsInput.new(things_json(id: '../../../etc/passwd', title: 'Hack'))
 
-    assert_raises(ValidatesId::Invalid) do
+    assert_raises(ArgumentError) do
       ReceivesThingsToDo.new(bad_input, store: store, log: log).call
     end
   end
