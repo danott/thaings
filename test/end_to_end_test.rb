@@ -136,14 +136,14 @@ class EndToEndTest < Minitest::Test
     assert_equal 'Working', working.workflow_tag
     assert_nil to_do.workflow_tag  # original unchanged
 
-    # with_response returns new instance
+    # with_response returns new instance with modified notes
     completed = to_do.with_response('My response')
-    assert_equal 'My response', completed.response
+    assert_includes completed.notes, 'My response'
     assert_equal 'Ready', completed.workflow_tag
-    assert_nil to_do.response  # original unchanged
+    assert_equal 'Original notes', to_do.notes  # original unchanged
   end
 
-  def test_to_do_full_notes_includes_response
+  def test_with_response_appends_to_notes
     message = Message.new(received_at: '2024-01-01', data: {
       'Title' => 'Test',
       'Notes' => 'Original notes',
@@ -151,14 +151,14 @@ class EndToEndTest < Minitest::Test
     })
     to_do = ToDo.from_message(message)
 
-    # Without response, full_notes is just notes
-    assert_equal 'Original notes', to_do.full_notes
+    # Original notes unchanged
+    assert_equal 'Original notes', to_do.notes
 
-    # With response, full_notes includes both
+    # with_response creates new ToDo with appended notes
     completed = to_do.with_response('Claude says hello')
-    assert_includes completed.full_notes, 'Original notes'
-    assert_includes completed.full_notes, 'Claude says hello'
-    assert_includes completed.full_notes, '---'  # separator
+    assert_includes completed.notes, 'Original notes'
+    assert_includes completed.notes, 'Claude says hello'
+    assert_includes completed.notes, '---'  # separator
   end
 
   def test_to_do_final_tags_replaces_workflow_tag
@@ -213,7 +213,7 @@ class EndToEndTest < Minitest::Test
     assert_equal 1, things.ready_updates.length
     last = things.ready_updates.first[:to_do]
     assert_equal 'Ready', last.workflow_tag
-    assert_includes last.full_notes, 'Here is my helpful answer'
+    assert_includes last.notes, 'Here is my helpful answer'
 
     # 4. Mark processed
     store.mark_processed(queue, message.received_at)

@@ -167,20 +167,19 @@ end
 
 # The to-do state (immutable value object)
 #
-# Represents the complete desired state - content, response, workflow tag.
+# Represents the complete desired state - content and workflow tag.
 # Transforms return new instances. Broadcast the final state to Things.
 #
 class ToDo
   WORKFLOW_TAGS = %w[Working Ready].freeze
 
-  attr_reader :title, :notes, :tags, :checklist, :response, :workflow_tag
+  attr_reader :title, :notes, :tags, :checklist, :workflow_tag
 
-  def initialize(title:, notes:, tags:, checklist:, response: nil, workflow_tag: nil)
+  def initialize(title:, notes:, tags:, checklist:, workflow_tag: nil)
     @title = title
     @notes = notes
     @tags = tags.freeze
     @checklist = checklist
-    @response = response
     @workflow_tag = workflow_tag
   end
 
@@ -200,15 +199,13 @@ class ToDo
   end
 
   def with_response(text)
-    with(response: text, workflow_tag: 'Ready')
+    with(
+      notes: "#{notes}\n\n---\n\n#{text}\n\n***\n\n",
+      workflow_tag: 'Ready'
+    )
   end
 
   # --- Computed state ---
-
-  def full_notes
-    return notes unless response
-    "#{notes}\n\n---\n\n#{response}\n\n***\n\n"
-  end
 
   def final_tags
     non_workflow_tags + [workflow_tag].compact
@@ -216,13 +213,12 @@ class ToDo
 
   private
 
-  def with(response: nil, workflow_tag: nil)
+  def with(notes: nil, workflow_tag: nil)
     ToDo.new(
       title: title,
-      notes: notes,
+      notes: notes || self.notes,
       tags: tags,
       checklist: checklist,
-      response: response || self.response,
       workflow_tag: workflow_tag || self.workflow_tag
     )
   end
@@ -511,7 +507,7 @@ class UpdatesThings
 
   def update(id, to_do)
     params = {}
-    params['notes'] = to_do.full_notes if to_do.response
+    params['notes'] = to_do.notes if to_do.workflow_tag == 'Ready'
     params['tags'] = to_do.final_tags.join(',') if to_do.workflow_tag
 
     open_url(id, params) unless params.empty?
