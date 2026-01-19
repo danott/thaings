@@ -291,10 +291,11 @@ class QueueStore
     Queue.new(id: id, dir: dir)
   end
 
-  # Mark a queue as processed (removes pending marker)
-  def mark_processed(queue)
-    queue.processed_file.write(queue.latest_message_at)
-    clear_pending(queue.id)
+  # Mark a specific message as processed
+  # Only clears pending if no newer messages arrived during processing
+  def mark_processed(queue, timestamp)
+    queue.processed_file.write(timestamp)
+    clear_pending(queue.id) unless queue.latest_message_at > timestamp
   end
 
   private
@@ -494,11 +495,15 @@ end
 
 # Immutable context that flows through a processing pipeline
 #
+# Captures the message at the start of processing so we know
+# exactly which message we processed (for race condition safety).
+#
 class ProcessingContext
-  attr_reader :queue, :to_do, :response
+  attr_reader :queue, :message, :to_do, :response
 
-  def initialize(queue:, to_do:, response: nil)
+  def initialize(queue:, message:, to_do:, response: nil)
     @queue = queue
+    @message = message
     @to_do = to_do
     @response = response
   end
@@ -506,6 +511,7 @@ class ProcessingContext
   def with(response: nil)
     ProcessingContext.new(
       queue: queue,
+      message: message,
       to_do: to_do,
       response: response || self.response
     )
@@ -562,7 +568,8 @@ class AskClaudeStep
   end
 end
 
-# Marks queue as processed (writes timestamp, clears pending marker)
+# Marks the captured message as processed
+# Only clears pending if no newer messages arrived
 #
 class MarkProcessedStep
   def initialize(store:)
@@ -570,7 +577,7 @@ class MarkProcessedStep
   end
 
   def call(ctx)
-    @store.mark_processed(ctx.queue)
+    @store.mark_processed(ctx.queue, ctx.message.received_at)
     ctx
   end
 end
@@ -603,6 +610,9 @@ end
 
 # Processes a single queue through Claude
 #
+# Captures the message at the start so we know exactly what we processed.
+# If newer messages arrive during processing, pending marker stays.
+#
 class ProcessesQueue
   attr_reader :queue, :store, :things, :daemon_log
 
@@ -623,16 +633,18 @@ class ProcessesQueue
     end
 
     begin
-      to_do = queue.to_do
-      unless to_do
+      message = queue.latest_message  # capture NOW, before processing
+      unless message
         daemon_log.write('skip', "#{queue.id} - no messages")
         return
       end
 
-      daemon_log.write('start', "#{queue.id} - processing")
-      queue_log.write('daemon', 'Started processing')
+      to_do = ToDo.from_message(message)
 
-      ctx = ProcessingContext.new(queue: queue, to_do: to_do)
+      daemon_log.write('start', "#{queue.id} - processing #{message.received_at}")
+      queue_log.write('daemon', "Started processing message #{message.received_at}")
+
+      ctx = ProcessingContext.new(queue: queue, message: message, to_do: to_do)
       pipeline.call(ctx)
 
       queue_log.write('daemon', 'Completed')
