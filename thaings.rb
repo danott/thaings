@@ -41,26 +41,19 @@ end
 # Loads environment variables from a file
 #
 class LoadsEnv
-  attr_reader :path
-
   def initialize(path)
     @path = Pathname(path)
   end
 
   def call
-    return unless path.exist?
+    return unless @path.exist?
 
-    parse_lines.each { |key, value| ENV[key] = value }
-  end
-
-  private
-
-  def parse_lines
-    path.readlines
+    @path.readlines
       .map(&:strip)
       .reject { |line| line.empty? || line.start_with?('#') }
       .map { |line| line.split('=', 2) }
       .select { |parts| parts.length == 2 }
+      .each { |key, value| ENV[key] = value }
   end
 end
 
@@ -232,23 +225,21 @@ end
 #   queues/{id}/processed           - timestamp of last processed
 #
 class QueueStore
-  attr_reader :config
-
   def initialize(config:)
     @config = config
   end
 
   # Find pending queue IDs - O(k) where k = pending count
   def pending_ids
-    return [] unless config.pending_dir.exist?
+    return [] unless @config.pending_dir.exist?
 
-    config.pending_dir.glob('*').map { |p| p.basename.to_s }
+    @config.pending_dir.glob('*').map { |p| p.basename.to_s }
   end
 
   # Load a queue snapshot by ID
   def find(id)
     validate_id!(id)
-    dir = config.queues_dir / id
+    dir = @config.queues_dir / id
     return nil unless dir.exist?
 
     load_queue(id, dir)
@@ -258,7 +249,7 @@ class QueueStore
   def write_message(id, data, at: Time.now.utc)
     validate_id!(id)
 
-    dir = config.queues_dir / id
+    dir = @config.queues_dir / id
     messages_dir = dir / 'messages'
     messages_dir.mkpath
 
@@ -307,7 +298,7 @@ class QueueStore
   end
 
   def read_latest_message_at(id)
-    dir = config.queues_dir / id
+    dir = @config.queues_dir / id
     messages_dir = dir / 'messages'
     return nil unless messages_dir.exist?
 
@@ -316,12 +307,12 @@ class QueueStore
   end
 
   def touch_pending(id)
-    config.pending_dir.mkpath
-    FileUtils.touch(config.pending_dir / id)
+    @config.pending_dir.mkpath
+    FileUtils.touch(@config.pending_dir / id)
   end
 
   def clear_pending(id)
-    marker = config.pending_dir / id
+    marker = @config.pending_dir / id
     marker.delete if marker.exist?
   end
 
