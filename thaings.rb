@@ -465,8 +465,7 @@ class ProcessesQueue
   end
 
   def call
-    acquired = Lock.new(queue.dir / '.lock').with_lock { process }
-    log.write(queue.id, 'locked - skipping') unless acquired
+    Lock.new(queue.dir / '.lock').with_lock { process }
   end
 
   private
