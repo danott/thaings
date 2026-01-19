@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'thaings'
+require_relative "thaings"
 
 # Wire dependencies at the edge
 config = ThaingsConfig.new

@@ -13,7 +13,8 @@ require "uri"
 
 HOME_DIR = Pathname(Dir.home)
 THAINGS_ROOT = Pathname(__FILE__).dirname.parent.expand_path
-PLIST_TEMPLATE = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist.example"
+PLIST_TEMPLATE =
+  THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist.example"
 PLIST_GENERATED = THAINGS_ROOT / "LaunchAgents" / "com.thaings.daemon.plist"
 PLIST_DEST = HOME_DIR / "Library" / "LaunchAgents" / "com.thaings.daemon.plist"
 ENV_FILE = THAINGS_ROOT / ".env"
@@ -92,20 +93,27 @@ def install
 
   # Generate plist from template
   puts "Generating LaunchAgent plist..."
-  plist_content = PLIST_TEMPLATE.read.gsub("__THAINGS_ROOT__", THAINGS_ROOT.to_s)
+  plist_content =
+    PLIST_TEMPLATE.read.gsub("__THAINGS_ROOT__", THAINGS_ROOT.to_s)
   PLIST_GENERATED.write(plist_content)
 
   # Load daemon
   puts "Loading daemon..."
-  warn "Warning: Failed to create symlink" unless system("ln", "-sf", PLIST_GENERATED.to_s, PLIST_DEST.to_s)
+  unless system("ln", "-sf", PLIST_GENERATED.to_s, PLIST_DEST.to_s)
+    warn "Warning: Failed to create symlink"
+  end
   system("launchctl", "unload", PLIST_DEST.to_s, err: File::NULL) # May fail if not loaded, that's OK
-  warn "Warning: Failed to load LaunchAgent" unless system("launchctl", "load", PLIST_DEST.to_s)
+  unless system("launchctl", "load", PLIST_DEST.to_s)
+    warn "Warning: Failed to load LaunchAgent"
+  end
 
   # Create to-do in Things
   puts "Creating setup checklist in Things..."
   json = JSON.generate(INSTALL_DATA)
   encoded = URI.encode_www_form_component(json).gsub("+", "%20")
-  warn "Warning: Failed to open Things" unless system("open", "-g", "things:///json?data=#{encoded}")
+  unless system("open", "-g", "things:///json?data=#{encoded}")
+    warn "Warning: Failed to open Things"
+  end
   system("open", "-g", "things:///inbox")
   puts "Visit your Things Inbox to finish setting up Thaings."
 end

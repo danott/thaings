@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
-require 'time'
-require 'json'
-require 'fileutils'
-require 'logger'
-require 'pathname'
-require 'open3'
-require 'timeout'
-require 'uri'
+require "time"
+require "json"
+require "fileutils"
+require "logger"
+require "pathname"
+require "open3"
+require "timeout"
+require "uri"
 
 # Encapsulates all thaings paths in one place
 #
@@ -28,13 +28,13 @@ class ThaingsConfig
     @root = Pathname(root)
   end
 
-  def to_dos_dir = root / 'to-dos'
-  def queue_dir = to_dos_dir / '_queue'
-  def log_dir = root / 'log'
-  def daemon_log = log_dir / 'daemon.log'
-  def receive_log = log_dir / 'receive.log'
-  def env_file = root / '.env'
-  def instructions_file = root / 'to-do-instructions.txt'
+  def to_dos_dir = root / "to-dos"
+  def queue_dir = to_dos_dir / "_queue"
+  def log_dir = root / "log"
+  def daemon_log = log_dir / "daemon.log"
+  def receive_log = log_dir / "receive.log"
+  def env_file = root / ".env"
+  def instructions_file = root / "to-do-instructions.txt"
 end
 
 # Loads environment variables from a file
@@ -49,10 +49,11 @@ class LoadsEnv
   def call
     return unless path.exist?
 
-    path.readlines
+    path
+      .readlines
       .map(&:strip)
-      .reject { |line| line.empty? || line.start_with?('#') }
-      .map { |line| line.split('=', 2) }
+      .reject { |line| line.empty? || line.start_with?("#") }
+      .map { |line| line.split("=", 2) }
       .select { |parts| parts.length == 2 }
       .each { |key, value| ENV[key] = value }
   end
@@ -116,13 +117,13 @@ class Message
     @data = data.freeze
   end
 
-  def title = data['Title']
-  def notes = data['Notes'] || ''
-  def checklist = data['Checklist Items']
+  def title = data["Title"]
+  def notes = data["Notes"] || ""
+  def checklist = data["Checklist Items"]
 
   def tags
-    tags_str = data['Tags'] || ''
-    tags_str.split(',').map(&:strip).reject(&:empty?)
+    tags_str = data["Tags"] || ""
+    tags_str.split(",").map(&:strip).reject(&:empty?)
   end
 end
 
@@ -156,14 +157,11 @@ class ToDo
   # --- Transforms (return new ToDo) ---
 
   def marked_working
-    with(workflow_tag: 'Working')
+    with(workflow_tag: "Working")
   end
 
   def with_response(text)
-    with(
-      notes: "#{notes}\n\n---\n\n#{text}\n\n***\n\n",
-      workflow_tag: 'Ready'
-    )
+    with(notes: "#{notes}\n\n---\n\n#{text}\n\n***\n\n", workflow_tag: "Ready")
   end
 
   # --- Computed state ---
@@ -172,7 +170,9 @@ class ToDo
     parts = []
     parts << title if title
     parts << "\n\n#{notes}" unless notes.empty?
-    parts << "\n\nChecklist:\n#{checklist}" if checklist.is_a?(String) && !checklist.empty?
+    if checklist.is_a?(String) && !checklist.empty?
+      parts << "\n\nChecklist:\n#{checklist}"
+    end
     parts.join
   end
 
@@ -216,8 +216,8 @@ class Queue
   end
 
   # Paths (no I/O, just path construction)
-  def messages_dir = dir / 'messages'
-  def processed_file = dir / 'processed'
+  def messages_dir = dir / "messages"
+  def processed_file = dir / "processed"
 end
 
 # Manages queues on disk with markers for fast lookup
@@ -240,7 +240,7 @@ class QueueStore
   def queued_ids
     return [] unless config.queue_dir.exist?
 
-    config.queue_dir.glob('*').map { |p| p.basename.to_s }
+    config.queue_dir.glob("*").map { |p| p.basename.to_s }
   end
 
   # Load a queue snapshot by ID
@@ -257,7 +257,7 @@ class QueueStore
     validate_id!(id)
 
     dir = config.to_dos_dir / id
-    messages_dir = dir / 'messages'
+    messages_dir = dir / "messages"
     messages_dir.mkpath
 
     timestamp = format_timestamp(at)
@@ -288,29 +288,28 @@ class QueueStore
   end
 
   def load_queue(id, dir)
-    Queue.new(
-      id: id,
-      dir: dir,
-      messages: load_messages(dir / 'messages')
-    )
+    Queue.new(id: id, dir: dir, messages: load_messages(dir / "messages"))
   end
 
   def load_messages(messages_dir)
     return [] unless messages_dir.exist?
 
-    messages_dir.glob('*.json').sort_by(&:basename).map do |file|
-      data = JSON.parse(file.read)
-      Message.new(received_at: file.basename('.json').to_s, data: data)
-    end
+    messages_dir
+      .glob("*.json")
+      .sort_by(&:basename)
+      .map do |file|
+        data = JSON.parse(file.read)
+        Message.new(received_at: file.basename(".json").to_s, data: data)
+      end
   end
 
   def read_latest_message_at(id)
     dir = config.to_dos_dir / id
-    messages_dir = dir / 'messages'
+    messages_dir = dir / "messages"
     return nil unless messages_dir.exist?
 
-    files = messages_dir.glob('*.json').sort_by(&:basename)
-    files.last&.basename('.json')&.to_s
+    files = messages_dir.glob("*.json").sort_by(&:basename)
+    files.last&.basename(".json")&.to_s
   end
 
   def enqueue(id)
@@ -324,14 +323,15 @@ class QueueStore
   end
 
   def format_timestamp(time)
-    time.utc.strftime('%Y-%m-%dT%H-%M-%S-%6NZ')
+    time.utc.strftime("%Y-%m-%dT%H-%M-%S-%6NZ")
   end
 end
 
 # Parses and validates input from Things
 #
 class ThingsInput
-  class InvalidInput < StandardError; end
+  class InvalidInput < StandardError
+  end
 
   def initialize(raw_input)
     @data = JSON.parse(raw_input)
@@ -340,15 +340,15 @@ class ThingsInput
   end
 
   def id
-    value = @data['ID']
-    raise InvalidInput, 'Missing ID field' if value.nil? || value.empty?
+    value = @data["ID"]
+    raise InvalidInput, "Missing ID field" if value.nil? || value.empty?
 
     value
   end
 
   def data = @data
-  def title = @data['Title'] || '(no title)'
-  def to_do? = @data['Type'] == 'To-Do'
+  def title = @data["Title"] || "(no title)"
+  def to_do? = @data["Type"] == "To-Do"
 end
 
 # Receives a Things to-do, writes message file, adds to queue
@@ -387,11 +387,7 @@ class AsksClaude
   def call(prompt)
     stdout, stderr, status = run(prompt)
 
-    if status.success?
-      stdout
-    else
-      "Error: Claude execution failed.\n#{stderr}"
-    end
+    status.success? ? stdout : "Error: Claude execution failed.\n#{stderr}"
   rescue Timeout::Error
     "Error: Claude timed out after #{TIMEOUT_SECONDS} seconds."
   end
@@ -400,16 +396,21 @@ class AsksClaude
 
   def run(prompt)
     Timeout.timeout(TIMEOUT_SECONDS) do
-      stdout, stderr, status = Open3.capture3(
-        '/opt/homebrew/bin/claude',
-        '--continue',
-        '--print',
-        '--max-turns', MAX_TURNS.to_s,
-        '--append-system-prompt-file', instructions_file.to_s,
-        '--allowedTools', ALLOWED_TOOLS.join(','),
-        '-p', prompt,
-        chdir: dir.to_s
-      )
+      stdout, stderr, status =
+        Open3.capture3(
+          "/opt/homebrew/bin/claude",
+          "--continue",
+          "--print",
+          "--max-turns",
+          MAX_TURNS.to_s,
+          "--append-system-prompt-file",
+          instructions_file.to_s,
+          "--allowedTools",
+          ALLOWED_TOOLS.join(","),
+          "-p",
+          prompt,
+          chdir: dir.to_s
+        )
       [stdout, stderr, status]
     end
   end
@@ -421,30 +422,37 @@ end
 # The ToDo knows what it should look like; this just sends it.
 #
 class UpdatesThings
-  class UpdateFailed < StandardError; end
+  class UpdateFailed < StandardError
+  end
 
   def update(id, to_do)
-    open_url(id, {
-      'notes' => to_do.notes,
-      'tags' => to_do.final_tags.join(',')
-    })
+    open_url(
+      id,
+      { "notes" => to_do.notes, "tags" => to_do.final_tags.join(",") }
+    )
   end
 
   private
 
   def open_url(id, params)
-    query = params.merge('id' => id, 'auth-token' => auth_token)
-      .map { |k, v| "#{k}=#{URI.encode_www_form_component(v).gsub('+', '%20')}" }
-      .join('&')
+    query =
+      params
+        .merge("id" => id, "auth-token" => auth_token)
+        .map do |k, v|
+          "#{k}=#{URI.encode_www_form_component(v).gsub("+", "%20")}"
+        end
+        .join("&")
 
     url = "things:///update?#{query}"
-    return if system('open', '-g', url)
+    return if system("open", "-g", url)
 
     raise UpdateFailed, "Failed to open Things URL: #{url[0, 50]}..."
   end
 
   def auth_token
-    ENV.fetch('THINGS_AUTH_TOKEN') { raise 'Missing THINGS_AUTH_TOKEN in ~/.thaings/.env' }
+    ENV.fetch("THINGS_AUTH_TOKEN") do
+      raise "Missing THINGS_AUTH_TOKEN in ~/.thaings/.env"
+    end
   end
 end
 
@@ -464,7 +472,7 @@ class ProcessesQueue
   end
 
   def call
-    Lock.new(queue.dir / '.lock').with_lock { process }
+    Lock.new(queue.dir / ".lock").with_lock { process }
   end
 
   private
@@ -472,7 +480,7 @@ class ProcessesQueue
   def process
     message = queue.latest_message
     unless message
-      log.write(queue.id, 'no messages - skipping')
+      log.write(queue.id, "no messages - skipping")
       return
     end
 
@@ -481,19 +489,20 @@ class ProcessesQueue
 
     things.update(queue.id, to_do.marked_working)
 
-    response = if to_do.prompt.strip.empty?
-                 log.write(queue.id, 'empty prompt - skipping claude')
-                 'Nothing to process - add a title or notes and try again.'
-               else
-                 log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
-                 claude.call(to_do.prompt)
-               end
+    response =
+      if to_do.prompt.strip.empty?
+        log.write(queue.id, "empty prompt - skipping claude")
+        "Nothing to process - add a title or notes and try again."
+      else
+        log.write(queue.id, "prompt: #{to_do.prompt.lines.first&.strip}")
+        claude.call(to_do.prompt)
+      end
 
     completed = to_do.with_response(response)
     things.update(queue.id, completed)
 
     store.mark_processed(queue, message.received_at)
-    log.write(queue.id, 'done')
+    log.write(queue.id, "done")
   end
 end
 
@@ -510,25 +519,32 @@ class RespondsToThingsToDo
   end
 
   def call
-    log.write('daemon', 'triggered')
+    log.write("daemon", "triggered")
 
     ids = store.queued_ids
 
     if ids.empty?
-      log.write('daemon', 'queue empty')
+      log.write("daemon", "queue empty")
       return
     end
 
-    log.write('daemon', "found #{ids.length} queued")
+    log.write("daemon", "found #{ids.length} queued")
 
     ids.each do |id|
       queue = store.find(id)
       next unless queue
 
-      claude = AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
-      ProcessesQueue.new(queue, store: store, things: things, log: log, claude: claude).call
+      claude =
+        AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
+      ProcessesQueue.new(
+        queue,
+        store: store,
+        things: things,
+        log: log,
+        claude: claude
+      ).call
     end
 
-    log.write('daemon', 'finished')
+    log.write("daemon", "finished")
   end
 end

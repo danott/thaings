@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATHS\" == *.rb ]]; then stree write $CLAUDE_FILE_PATHS 2>/dev/null || true; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
