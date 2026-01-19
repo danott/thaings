@@ -70,11 +70,53 @@ launchctl list | grep thaings
 
 ## Testing
 
-Run scripts directly for testing:
+### Automated Tests
+
+Run the test suite with:
+```bash
+ruby test/end_to_end_test.rb
+```
+
+Tests use Minitest and run in isolated temp directories. They test the core components (receiving, queueing, state transitions) with stubbed dependencies - no actual Claude calls or Things updates.
+
+### Manual Component Testing
+
+Test individual scripts directly:
 ```bash
 # Test receive (pipe JSON to stdin)
 echo '{"Type":"To-Do","ID":"test123","Title":"Test to-do"}' | ./bin/receives-things-to-dos
 
-# Test respond (processes pending to-dos)
+# Test respond (processes queued to-dos)
 ./bin/responds-to-things-to-dos
 ```
+
+### Real-World End-to-End Test
+
+1. **Verify the daemon is running:**
+   ```bash
+   launchctl list | grep thaings
+   ```
+
+2. **Create a test to-do in Things** with a simple title like "What is 2+2?"
+
+3. **Run the Thaings shortcut** on that to-do (via the Services menu or keyboard shortcut)
+
+4. **Watch the logs:**
+   ```bash
+   tail -f log/daemon.log
+   ```
+
+   You should see: `triggered` → `received` → `processing` → `done`
+
+5. **Check the to-do in Things** - it should have:
+   - The `Working` tag (briefly), then `Ready` tag
+   - Claude's response appended to the notes
+
+6. **Verify queue state:**
+   ```bash
+   # Should be empty after processing
+   ls to-dos/_queue/
+
+   # Message files persist
+   ls to-dos/<to-do-id>/messages/
+   ```

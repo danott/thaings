@@ -5,7 +5,7 @@ require 'fileutils'
 require 'tmpdir'
 require 'pathname'
 
-require_relative '../thaings'
+require_relative '../lib/thaings'
 
 # Stub for UpdatesThings - records updates without opening URLs
 class StubUpdatesThings
@@ -40,7 +40,7 @@ module TestHelpers
     @config = ThaingsConfig.new(root: @test_root)
 
     # Create required directories
-    @config.pending_dir.mkpath
+    @config.queue_dir.mkpath
     @config.to_dos_dir.mkpath
     @config.log_dir.mkpath
 
@@ -86,7 +86,7 @@ class EndToEndTest < Minitest::Test
     assert_equal 'My Task', queue.messages.first.title
 
     # Verify pending marker was created
-    assert config.pending_dir.join('test123').exist?, 'Pending marker should exist'
+    assert config.queue_dir.join('test123').exist?, 'Pending marker should exist'
   end
 
   def test_receive_adds_message_to_existing_queue
@@ -115,7 +115,7 @@ class EndToEndTest < Minitest::Test
     ReceivesThingsToDo.new(input, store: store, log: log).call
 
     # Verify pending IDs include our queue
-    ids = store.pending_ids
+    ids = store.queued_ids
     assert_includes ids, 'test123'
   end
 
@@ -215,7 +215,7 @@ class EndToEndTest < Minitest::Test
     store.mark_processed(queue, message.received_at)
 
     # Verify pending marker is cleared
-    refute config.pending_dir.join('abc').exist?, 'Pending marker should be cleared'
+    refute config.queue_dir.join('abc').exist?, 'Pending marker should be cleared'
   end
 
   def test_new_message_during_processing_keeps_pending
@@ -238,7 +238,7 @@ class EndToEndTest < Minitest::Test
     store.mark_processed(queue, captured_message.received_at)
 
     # Pending marker should STILL exist (because Second > First)
-    assert config.pending_dir.join('race').exist?, 'Pending marker should remain'
+    assert config.queue_dir.join('race').exist?, 'Pending marker should remain'
 
     # Latest message is the second one
     reloaded = store.find('race')
@@ -296,6 +296,6 @@ class EndToEndTest < Minitest::Test
 
     # No queue should be created
     assert_nil store.find('proj123')
-    assert_empty store.pending_ids
+    assert_empty store.queued_ids
   end
 end

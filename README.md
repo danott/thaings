@@ -24,6 +24,24 @@ whether to mark it complete or continue the conversation.
 
 This installer will setup a LaunchAgent and create a to-do in your Things Inbox that walks you through the remaining setup.
 
+## Testing
+
+### Automated Tests
+
+```bash
+ruby test/end_to_end_test.rb
+```
+
+### End-to-End Test
+
+1. Ensure the daemon is running: `launchctl list | grep thaings`
+2. Create a to-do in Things with a simple prompt (e.g., "What is 2+2?")
+3. Run the Thaings shortcut on that to-do
+4. Watch `tail -f log/daemon.log` for processing activity
+5. Verify the to-do gets the `Ready` tag and Claude's response in notes
+
+See [CLAUDE.md](CLAUDE.md) for more detailed testing instructions.
+
 ## License
 
 MIT
