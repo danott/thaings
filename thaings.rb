@@ -416,13 +416,18 @@ end
 
 # Asks Claude to respond to a prompt
 #
-module AsksClaude
+class AsksClaude
   ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
   MAX_TURNS = 10
   TIMEOUT_SECONDS = 300
 
-  def self.call(prompt, dir:, instructions_file:)
-    stdout, stderr, status = run(prompt, dir: dir, instructions_file: instructions_file)
+  def initialize(dir:, instructions_file:)
+    @dir = dir
+    @instructions_file = instructions_file
+  end
+
+  def call(prompt)
+    stdout, stderr, status = run(prompt)
 
     if status.success?
       stdout
@@ -433,22 +438,23 @@ module AsksClaude
     "Error: Claude timed out after #{TIMEOUT_SECONDS} seconds."
   end
 
-  def self.run(prompt, dir:, instructions_file:)
+  private
+
+  def run(prompt)
     Timeout.timeout(TIMEOUT_SECONDS) do
       stdout, stderr, status = Open3.capture3(
         '/opt/homebrew/bin/claude',
         '--continue',
         '--print',
         '--max-turns', MAX_TURNS.to_s,
-        '--append-system-prompt-file', instructions_file.to_s,
+        '--append-system-prompt-file', @instructions_file.to_s,
         '--allowedTools', ALLOWED_TOOLS.join(','),
         '-p', prompt,
-        chdir: dir.to_s
+        chdir: @dir.to_s
       )
       [stdout.force_encoding('UTF-8'), stderr.force_encoding('UTF-8'), status]
     end
   end
-  private_class_method :run
 end
 
 # Broadcasts to-do state to Things app via URL scheme
@@ -528,7 +534,7 @@ class ProcessesQueue
                  'Nothing to process - add a title or notes and try again.'
                else
                  queue_log.write('daemon', "Prompt: #{prompt.lines.first&.strip}")
-                 AsksClaude.call(prompt, dir: queue.dir, instructions_file: instructions_file)
+                 AsksClaude.new(dir: queue.dir, instructions_file: instructions_file).call(prompt)
                end
 
     # Compute final state and broadcast
