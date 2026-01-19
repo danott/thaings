@@ -167,70 +167,53 @@ end
 
 # A to-do (immutable value object)
 #
-# States: pending, working, review
+# Minimal state: just messages and how many we've processed.
+# Status is derived: processable when messages.length > messages_processed.
 #
-# Transitions:
-#   pending                  → working (picked up for processing)
-#   working                  → review  (Claude responded)
-#   review + new messages    → working (user continues conversation)
+# "Working" state is ephemeral (only in memory during pipeline execution).
+# This avoids stuck to-dos if the daemon crashes mid-processing.
 #
 class ToDo
-  attr_reader :id, :dir, :status, :received_at, :started_at, :completed_at,
-              :messages_processed, :messages
+  attr_reader :id, :dir, :messages_processed, :messages
 
-  def initialize(id:, dir:, status:, received_at:, started_at: nil,
-                 completed_at: nil, messages_processed: 0, messages: [])
+  def initialize(id:, dir:, messages_processed: 0, messages: [])
     @id = id
     @dir = dir
-    @status = status
-    @received_at = received_at
-    @started_at = started_at
-    @completed_at = completed_at
     @messages_processed = messages_processed
     @messages = messages.freeze
   end
 
-  # --- State transitions (return new ToDo) ---
-
-  def marked_working(at: Time.now.utc.iso8601)
-    ToDo.new(
-      id: id, dir: dir, status: 'working', received_at: received_at,
-      started_at: at, completed_at: completed_at,
-      messages_processed: messages_processed, messages: messages
-    )
-  end
-
-  def marked_review(at: Time.now.utc.iso8601)
-    ToDo.new(
-      id: id, dir: dir, status: 'review', received_at: received_at,
-      started_at: started_at, completed_at: at,
-      messages_processed: messages.length, messages: messages
-    )
-  end
+  # --- Transitions (return new ToDo) ---
 
   def with_message(data, at: Time.now.utc.iso8601)
     new_message = { 'received_at' => at, 'data' => data }
     ToDo.new(
-      id: id, dir: dir, status: status, received_at: received_at,
-      started_at: started_at, completed_at: completed_at,
-      messages_processed: messages_processed, messages: messages + [new_message]
+      id: id, dir: dir,
+      messages_processed: messages_processed,
+      messages: messages + [new_message]
     )
   end
 
-  # --- Status queries ---
-
-  def pending? = status == 'pending'
-  def working? = status == 'working'
-  def review? = status == 'review'
-
-  def processable?
-    pending? || (review? && has_new_messages?)
+  def marked_processed
+    ToDo.new(
+      id: id, dir: dir,
+      messages_processed: messages.length,
+      messages: messages
+    )
   end
 
-  # --- Message queries ---
+  # --- Queries ---
+
+  def processable?
+    messages.length > messages_processed
+  end
 
   def latest_message
     messages.last&.dig('data') || {}
+  end
+
+  def first_received_at
+    messages.first&.dig('received_at')
   end
 
   def title
@@ -254,15 +237,12 @@ class ToDo
 
   def to_do_file = dir / 'to-do.json'
   def log_file = dir / 'to-do.log'
-
-  private
-
-  def has_new_messages?
-    messages.length > messages_processed
-  end
 end
 
 # Reads and writes to-dos to disk
+#
+# JSON format:
+#   { "messages_processed": 1, "messages": [...] }
 #
 # Usage:
 #   store = ToDoStore.new
@@ -287,21 +267,16 @@ class ToDoStore
     from_hash(id, dir, data)
   end
 
-  def find_or_create(id, at: Time.now.utc.iso8601)
-    find(id) || create(id, at: at)
+  def find_or_create(id)
+    find(id) || create(id)
   end
 
-  def create(id, at: Time.now.utc.iso8601)
+  def create(id)
     ValidatesId.new(id).call
     dir = root_dir / id
     dir.mkpath
 
-    ToDo.new(
-      id: id,
-      dir: dir,
-      status: 'pending',
-      received_at: at
-    )
+    ToDo.new(id: id, dir: dir)
   end
 
   def all_ids
@@ -323,10 +298,6 @@ class ToDoStore
     ToDo.new(
       id: id,
       dir: dir,
-      status: data['status'],
-      received_at: data['received_at'],
-      started_at: data['started_at'],
-      completed_at: data['completed_at'],
       messages_processed: data['messages_processed'] || 0,
       messages: data['messages'] || []
     )
@@ -334,10 +305,6 @@ class ToDoStore
 
   def to_hash(to_do)
     {
-      'status' => to_do.status,
-      'received_at' => to_do.received_at,
-      'started_at' => to_do.started_at,
-      'completed_at' => to_do.completed_at,
       'messages_processed' => to_do.messages_processed,
       'messages' => to_do.messages
     }
@@ -470,7 +437,7 @@ class FindsProcessableToDos
       .map { |id| store.find(id) }
       .compact
       .select(&:processable?)
-      .sort_by { |t| t.received_at || '' }
+      .sort_by { |t| t.first_received_at || '' }
   end
 end
 
@@ -604,20 +571,6 @@ end
 # Each step transforms a ProcessingContext.
 # Simple objects, easy to test in isolation.
 
-# Marks to-do as working and persists it
-#
-class MarkWorkingStep
-  def initialize(store:)
-    @store = store
-  end
-
-  def call(ctx)
-    working = ctx.to_do.marked_working
-    @store.save(working)
-    ctx.with(to_do: working)
-  end
-end
-
 # Updates Things to show "Working" tag
 #
 class SetWorkingTagStep
@@ -652,17 +605,17 @@ class AskClaudeStep
   end
 end
 
-# Marks to-do as review and persists it
+# Marks all messages as processed and persists
 #
-class MarkReviewStep
+class MarkProcessedStep
   def initialize(store:)
     @store = store
   end
 
   def call(ctx)
-    review = ctx.to_do.marked_review
-    @store.save(review)
-    ctx.with(to_do: review)
+    processed = ctx.to_do.marked_processed
+    @store.save(processed)
+    ctx.with(to_do: processed)
   end
 end
 
@@ -736,10 +689,9 @@ class ProcessesToDo
 
   def pipeline
     Pipeline.new([
-      MarkWorkingStep.new(store: store),
       SetWorkingTagStep.new(things: things),
       AskClaudeStep.new(log: to_do_log),
-      MarkReviewStep.new(store: store),
+      MarkProcessedStep.new(store: store),
       AppendResponseStep.new(things: things),
       SetReadyTagStep.new(things: things)
     ])
