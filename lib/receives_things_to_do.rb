@@ -10,7 +10,7 @@ log = Log.new(config.receive_log)
 begin
   raw = $stdin.read.strip
   ReceivesThingsToDo.new(ThingsInput.new(raw), store: store, log: log).call
-rescue ThingsInput::InvalidInput => e
-  $stderr.puts e.message
+rescue => e
+  $stderr.puts "#{e.class}: #{e.message}"
   exit 1
 end

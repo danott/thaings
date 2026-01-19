@@ -161,7 +161,10 @@ class ToDo
   end
 
   def with_response(text)
-    with(notes: "#{notes}\n\n---\n\n#{text}\n\n***\n\n", workflow_tag: "Ready")
+    with(
+      notes: [notes.strip, "---", text.strip, "***", ""].join("\n\n"),
+      workflow_tag: "Ready"
+    )
   end
 
   # --- Computed state ---
