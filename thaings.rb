@@ -214,21 +214,16 @@ end
 # QueueStore handles all I/O and returns Queue snapshots.
 #
 class Queue
-  attr_reader :id, :dir, :messages, :processed_at
+  attr_reader :id, :dir, :messages
 
-  def initialize(id:, dir:, messages: [], processed_at: '')
+  def initialize(id:, dir:, messages: [])
     @id = id
     @dir = dir
     @messages = messages.freeze
-    @processed_at = processed_at
   end
 
   def latest_message
     messages.last
-  end
-
-  def latest_message_at
-    latest_message&.received_at
   end
 
   # Paths (no I/O, just path construction)
@@ -307,8 +302,7 @@ class QueueStore
     Queue.new(
       id: id,
       dir: dir,
-      messages: load_messages(dir / 'messages'),
-      processed_at: load_processed_at(dir / 'processed')
+      messages: load_messages(dir / 'messages')
     )
   end
 
@@ -319,10 +313,6 @@ class QueueStore
       data = JSON.parse(file.read(encoding: 'UTF-8'))
       Message.new(received_at: file.basename('.json').to_s, data: data)
     end
-  end
-
-  def load_processed_at(processed_file)
-    processed_file.exist? ? processed_file.read.strip : ''
   end
 
   def read_latest_message_at(id)
