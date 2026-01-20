@@ -69,7 +69,7 @@ INSTALL_DATA = [
   {
     "type" => "to-do",
     "attributes" => {
-      "title" => "Finish setting up Thaings",
+      "title" => "Finish setting up Thaings...",
       "notes" => NOTES,
       "checklist-items" => [
         checklist_item("Tags created"),
