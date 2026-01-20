@@ -68,6 +68,17 @@ launchctl list | grep thaings
 - `log/receive.log` - Incoming to-do receipts
 - `log/daemon.stdout.log` / `daemon.stderr.log` - LaunchAgent output
 
+## Commit Messages
+
+- **Focus on why, not what** — the diff shows what changed; explain the reasoning
+- **Connect to the human impact** — use our conversation to understand the motivation; what difference does this make in someone's life? Why does it matter?
+- **Subject line under 50 characters** — concise summary of the change
+- **Wrap body at 72 characters** — traditional git convention
+- **Write detailed bodies** — provide thorough context and reasoning for changes
+- **Avoid vague messages** — no "fix bug" or "update code" without explanation
+- **Don't list files changed** — the diff already shows this
+- **Don't reference tickets** — keep the history self-contained
+
 ## Ruby Style
 
 **Formatting:** Format all Ruby code with [Syntax Tree](https://github.com/ruby-syntax-tree/syntax_tree). Run `stree format <file>` or `stree write <file>` to format files.
