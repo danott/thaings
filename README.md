@@ -1,28 +1,48 @@
 # Thaings
 
-Thaings adds agentic workers to to-dos in Things. It’s *AI* augmenting *Things*. *Thaings*. You get it.
+Thaings adds agentic workers to to-dos in Things. It's *AI* augmenting *Things*. *Thaings*. You get it.
 
 ## How it works
 
-Select a to-do in Things and run the Thaings shortcut. The to-do gets
-tagged `Working` while Claude processes it. When done, the results are
-appended to the to-do's notes and the tag changes to `Ready`. You decide
-whether to mark it complete or continue the conversation.
+Select a to-do in Things and run the Thaings shortcut. A background daemon picks it up and tags it `Working` while Claude processes it. When done, the results are appended to the to-do's notes and the tag changes to `Ready`. You decide whether to mark it complete or continue the conversation.
 
-## Requirements
+Each to-do gets its own conversation context—Claude can reference previous exchanges in that to-do's history.
+
+## Assumptions
 
 - macOS
+- [Homebrew](https://brew.sh)
 - [Things](https://culturedcode.com/things/)
-- [Claude Code](https://claude.ai/code)
-- Ruby 3.0+ (via [rbenv](https://github.com/rbenv/rbenv))
+- [Claude Code](https://claude.ai/code) installed via Homebrew
+- Ruby 3.0+ via [rbenv](https://github.com/rbenv/rbenv) (the daemon expects Ruby at `~/.rbenv/shims/ruby`)
+- Apple Shortcuts (comes with macOS)
 
 ## Installation
+
+### Quick install
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/danott/thaings/main/install.sh)"
 ```
 
-This installer will setup a LaunchAgent and create a to-do in your Things Inbox that walks you through the remaining setup.
+This clones the repository to `$HOME/thaings`, sets up a LaunchAgent, and creates a to-do in your Things Inbox that walks you through the remaining setup.
+
+### Manual install
+
+If you prefer a different location:
+
+```bash
+git clone https://github.com/danott/thaings.git /path/to/thaings
+cd /path/to/thaings
+./bin/install
+```
+
+Note: The Apple Shortcut expects Thaings at `$HOME/thaings`. If you install elsewhere, you'll need to edit the shortcut to point to your install location.
+
+## Known caveats
+
+1. **Collapse to-dos before calling the shortcut.** Things' "Get Selected Items" returns unpredictable data when a to-do is open for editing.
+2. **Don't edit to-dos while Thaings is working.** Things' URL scheme updates are unpredictable when the notes field is focused. Let the to-do rest until it's tagged `Ready`.
 
 ## Testing
 

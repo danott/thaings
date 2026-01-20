@@ -21,20 +21,16 @@ ENV_FILE = THAINGS_ROOT / ".env"
 ENV_TEMPLATE = "THINGS_AUTH_TOKEN=paste-your-token-here\n"
 
 NOTES = <<~NOTES
-  Welcome to Thaings! Follow the steps below to augment your to-dos with agentic workers.
+  Welcome to Thaings! Follow these steps to augment your to-dos with agentic workers.
 
-  ## 1. Manually create tags
+  ## 1. Create tags
 
-  Thaings uses tags to communicate status back into Things. This is completely optional, but is useful for seeing things moving.
+  Create these tags manually (⌃⌘T or Window → Tags):
 
   1. `Working`
   2. `Ready`
 
-  Sadly, there's no way to automate tag creation. Open the tag editor to create them manually (⌃⌘T or Window → Tags in the macOS toolbar).
-
   ## 2. Enable Things URLs
-
-  In the macOS toolbar:
 
   Things → Settings → General → Enable Things URLs.
 
@@ -42,23 +38,26 @@ NOTES = <<~NOTES
 
   ## 3. Save auth token
 
-  Paste your token into the `.env` configuration file so Thaings can update the notes and tags on your to-dos.
+  Paste your token into `.env` so Thaings can update your to-dos.
 
-  [Reveal the file in Finder](file://#{THAINGS_ROOT}/.env) then edit and save with TextEdit or your favorite text editor.
+  [Reveal .env in Finder](file://#{THAINGS_ROOT}/.env)
 
-  ## 4. Install Apple Shortcut
+  ## 4. Install shortcut
 
-  Apple Shortcuts is the only way to communicate state from Things to Thaings.
+  The Apple Shortcut is how you will send to-dos from Things to Thaings.
 
-  [Reveal the file in Finder](file://#{THAINGS_ROOT}/Thaings.shortcut) then double-click to install the shortcut.
+  [Reveal shortcut in Finder](file://#{THAINGS_ROOT}/Thaings.shortcut) → double-click to install.
 
-  ## 5. Known limitations
+  ## 5. Know the caveats
 
-  The shortcut sends selected items from Things to Thaings. It is important that the Things to-dos are collapsed when you do this. Appending notes to a to-do is flaky if the notes field is focused in the GUI. Once you queue up a to-do, just let it rest until you see it tagged as `Ready`. Go for a walk. Write a poem. The world is out there while the agents are working in here!
+  1. **Collapse to-dos before calling the shortcut.** Things' "Get Selected Items" returns unpredictable data when a to-do is open for editing.
+  2. **Don't edit to-dos while Thaings is working.** Things' URL scheme updates are unpredictable when the notes field is focused. Let the to-do rest until it's tagged `Ready`.
+
+  Go for a walk. Write a poem. The world is out there while the agents are working in here!
 
   ## 6. Try it out!
 
-  Check off the items in the checklist below once you've completed them. Collapse this to-do, keep it selected, and run the Thaings shortcut. Watch the tags change from `Working` to `Ready`, then re-open to see what Thaings responded with in this to-do's notes!
+  Check off the items below, collapse this to-do, and run the Thaings shortcut. Watch the tag change from `Working` to `Ready`, then re-open to see what Thaings responded with!
 NOTES
 
 def checklist_item(title)
