@@ -3,7 +3,7 @@
 require_relative "thaings"
 
 # Wire dependencies at the edge
-config = ThaingsConfig.new
+config = ThaingsConfig.from_env
 store = QueueStore.new(config: config)
 log = Log.new(config.receive_log)
 

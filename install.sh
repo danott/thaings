@@ -4,7 +4,7 @@ set -e
 # Thaings installer
 # Usage: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/danott/thaings/main/install.sh)"
 
-THAINGS_ROOT="$HOME/.thaings"
+THAINGS_ROOT="$HOME/thaings"
 REPO_URL="https://github.com/danott/thaings.git"
 
 echo "Installing Thaings..."

@@ -37,7 +37,7 @@ module TestHelpers
   def setup
     super
     @test_root = Pathname(Dir.mktmpdir("thaings-test"))
-    @config = ThaingsConfig.new(root: @test_root)
+    @config = ThaingsConfig.new(root: @test_root, things_auth_token: "test-token")
 
     # Create required directories
     @config.queue_dir.mkpath

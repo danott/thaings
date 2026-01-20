@@ -22,10 +22,24 @@ require "uri"
 #   log/
 #
 class ThaingsConfig
-  attr_reader :root
+  attr_reader :root, :things_auth_token
 
-  def initialize(root: Pathname(__FILE__).dirname.parent.expand_path)
+  def self.from_env
+    root = Pathname(__FILE__).dirname.parent.expand_path
+    env_file = root / ".env"
+    LoadsEnv.new(env_file).call
+
+    things_auth_token = ENV.fetch("THINGS_AUTH_TOKEN", "")
+    if things_auth_token.length == 0
+      raise "Missing THINGS_AUTH_TOKEN in #{env_file}"
+    end
+
+    new(root: root, things_auth_token: things_auth_token)
+  end
+
+  def initialize(root:, things_auth_token:)
     @root = Pathname(root)
+    @things_auth_token = things_auth_token
   end
 
   def to_dos_dir = root / "to-dos"
@@ -479,6 +493,12 @@ class UpdatesThings
   class UpdateFailed < StandardError
   end
 
+  attr_reader :config
+
+  def initialize(config:)
+    @config = config
+  end
+
   def update(id, to_do)
     open_url(
       id,
@@ -491,7 +511,7 @@ class UpdatesThings
   def open_url(id, params)
     query =
       params
-        .merge("id" => id, "auth-token" => auth_token)
+        .merge("id" => id, "auth-token" => config.things_auth_token)
         .map do |k, v|
           "#{k}=#{URI.encode_www_form_component(v).gsub("+", "%20")}"
         end
@@ -501,12 +521,6 @@ class UpdatesThings
     return if system("open", "-g", url)
 
     raise UpdateFailed, "Failed to open Things URL: #{url[0, 50]}..."
-  end
-
-  def auth_token
-    ENV.fetch("THINGS_AUTH_TOKEN") do
-      raise "Missing THINGS_AUTH_TOKEN in ~/.thaings/.env"
-    end
   end
 end
 
