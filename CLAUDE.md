@@ -70,6 +70,8 @@ launchctl list | grep thaings
 
 ## Ruby Style
 
+**Formatting:** Format all Ruby code with [Syntax Tree](https://github.com/ruby-syntax-tree/syntax_tree). Run `stree format <file>` or `stree write <file>` to format files.
+
 - Use `hash.fetch('key')` instead of `hash['key']` — missing values should cause explicit failures, not silent nils
 - Use `hash.fetch('key', default)` when a default is appropriate
 - Never reference instance variables (`@var`) outside of `initialize` — use `attr_reader` and call the method instead
