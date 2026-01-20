@@ -9,20 +9,6 @@ require "open3"
 require "timeout"
 require "uri"
 
-# Encapsulates all thaings paths in one place
-#
-# Directory structure:
-#   to-dos/
-#     _queue/            # marker files - presence = has work
-#       {id}
-#     {id}/
-#       messages/
-#         {timestamp}.json
-#       processed        # timestamp of last processed message
-#   log/
-#
-# How to talk to Claude
-#
 class ClaudeConfig
   DEFAULT_SYSTEM_PROMPT_FILE = "default-system-prompt.md"
   DEFAULT_MAX_TURNS = 10
@@ -65,8 +51,6 @@ class ClaudeConfig
   end
 end
 
-# Where things live
-#
 class ThaingsConfig
   attr_reader :root, :things_auth_token, :claude_config
 
@@ -165,8 +149,6 @@ class LoadsEnv
   end
 end
 
-# Append-only log writer
-#
 class Log
   attr_reader :logger
 
@@ -181,14 +163,6 @@ class Log
   end
 end
 
-# Null object for Log
-#
-class NullLog
-  def write(_tag, _message) = nil
-end
-
-# File-based exclusive lock with block form
-#
 class Lock
   attr_reader :path
 
@@ -260,8 +234,6 @@ class ToDo
     )
   end
 
-  # --- Transforms (return new ToDo) ---
-
   def marked_working
     with(workflow_tag: "Working")
   end
@@ -272,8 +244,6 @@ class ToDo
       workflow_tag: "Ready"
     )
   end
-
-  # --- Computed state ---
 
   def prompt
     parts = []
@@ -345,14 +315,12 @@ class QueueStore
     @config = config
   end
 
-  # Find queued IDs - O(k) where k = queue size
   def queued_ids
     return [] unless config.queue_dir.exist?
 
     config.queue_dir.glob("*").map { |p| p.basename.to_s }
   end
 
-  # Load a queue snapshot by ID
   def find(id)
     validate_id!(id)
     dir = config.to_dos_dir / id
@@ -361,7 +329,6 @@ class QueueStore
     load_queue(id, dir)
   end
 
-  # Write a new message and add to queue
   def write_message(id, data, at: Time.now.utc)
     validate_id!(id)
 
@@ -378,7 +345,6 @@ class QueueStore
     load_queue(id, dir)
   end
 
-  # Mark a specific message as processed
   # Only dequeues if no newer messages arrived during processing
   def mark_processed(queue, timestamp)
     queue.processed_file.write(timestamp)
@@ -436,8 +402,6 @@ class QueueStore
   end
 end
 
-# Parses and validates input from Things
-#
 class ThingsInput
   class InvalidInput < StandardError
   end
@@ -468,8 +432,6 @@ class ThingsInput
   def to_do? = data.fetch("Type", nil) == "To-Do"
 end
 
-# Receives a Things to-do, writes message file, adds to queue
-#
 class ReceivesThingsToDo
   attr_reader :input, :store, :log
 
@@ -488,8 +450,6 @@ class ReceivesThingsToDo
   end
 end
 
-# Asks Claude to respond to a prompt
-#
 class AsksClaude
   attr_reader :dir, :config
 
@@ -529,11 +489,8 @@ class AsksClaude
   end
 end
 
-# Broadcasts to-do state to Things app via URL scheme
-#
 # Declarative: takes a ToDo and broadcasts its current state.
 # The ToDo knows what it should look like; this just sends it.
-#
 class UpdatesThings
   class UpdateFailed < StandardError
   end
@@ -569,10 +526,7 @@ class UpdatesThings
   end
 end
 
-# Processes a single queue through Claude
-#
 # Simple flow: compute state, broadcast state.
-#
 class ProcessesQueue
   attr_reader :queue, :store, :things, :log, :claude
 
@@ -615,8 +569,6 @@ class ProcessesQueue
   end
 end
 
-# Entry point: wakes, finds queued to-dos, processes them
-#
 class RespondsToThingsToDo
   attr_reader :store, :log, :things, :claude_config
 

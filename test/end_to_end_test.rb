@@ -32,6 +32,10 @@ class StubUpdatesThings
   end
 end
 
+class NullLog
+  def write(_tag, _message) = nil
+end
+
 # Test helper for creating isolated test environments
 module TestHelpers
   def setup
@@ -46,12 +50,10 @@ module TestHelpers
         claude_config: claude_config
       )
 
-    # Create required directories
     @config.queue_dir.mkpath
     @config.to_dos_dir.mkpath
     @config.log_dir.mkpath
 
-    # Create a minimal system prompt file
     @config.claude_config.system_prompt_file.write(
       "You are a helpful assistant."
     )
