@@ -29,7 +29,7 @@ Things App
 - `bin/receives-things-to-dos` - Receives JSON from Things automation, creates to-do files
 - `bin/responds-to-things-to-dos` - Processes to-dos through Claude, updates Things
 - `LaunchAgents/com.thaings.daemon.plist` - macOS LaunchAgent that triggers daemon on to-do directory changes
-- `to-do-instructions.txt` - System prompt for to-do-processing Claude sessions (passed via `--append-system-prompt-file`)
+- `default-system-prompt.md` - Default system prompt for to-do-processing Claude sessions (configurable via `SYSTEM_PROMPT_FILE`)
 - `.claude/` - Claude config for thaings development (this project)
 
 ## To-Do Lifecycle

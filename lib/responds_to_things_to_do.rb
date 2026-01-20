@@ -13,5 +13,5 @@ RespondsToThingsToDo.new(
   store: store,
   log: log,
   things: things,
-  instructions_file: config.instructions_file
+  claude_config: config.claude_config
 ).call

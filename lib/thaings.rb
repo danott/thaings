@@ -21,25 +21,76 @@ require "uri"
 #       processed        # timestamp of last processed message
 #   log/
 #
+# How to talk to Claude
+#
+class ClaudeConfig
+  DEFAULT_SYSTEM_PROMPT_FILE = "default-system-prompt.md"
+  DEFAULT_MAX_TURNS = 10
+  DEFAULT_TIMEOUT_SECONDS = 300
+  DEFAULT_ALLOWED_TOOLS = "WebSearch,WebFetch"
+  DEFAULT_PATH = "/opt/homebrew/bin/claude"
+
+  attr_reader :system_prompt_file,
+              :max_turns,
+              :timeout_seconds,
+              :allowed_tools,
+              :path
+
+  def self.from_env(root:)
+    default_system_prompt_file = (root / DEFAULT_SYSTEM_PROMPT_FILE).to_s
+
+    new(
+      system_prompt_file:
+        ENV.fetch("THAINGS_SYSTEM_PROMPT_FILE", default_system_prompt_file),
+      max_turns: ENV.fetch("THAINGS_MAX_TURNS", DEFAULT_MAX_TURNS).to_i,
+      timeout_seconds:
+        ENV.fetch("THAINGS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS).to_i,
+      allowed_tools: ENV.fetch("THAINGS_ALLOWED_TOOLS", DEFAULT_ALLOWED_TOOLS),
+      path: ENV.fetch("THAINGS_CLAUDE_PATH", DEFAULT_PATH)
+    )
+  end
+
+  def initialize(
+    system_prompt_file:,
+    max_turns: DEFAULT_MAX_TURNS,
+    timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
+    allowed_tools: DEFAULT_ALLOWED_TOOLS,
+    path: DEFAULT_PATH
+  )
+    @system_prompt_file = Pathname(system_prompt_file).expand_path
+    @max_turns = max_turns
+    @timeout_seconds = timeout_seconds
+    @allowed_tools = allowed_tools
+    @path = path
+  end
+end
+
+# Where things live
+#
 class ThaingsConfig
-  attr_reader :root, :things_auth_token
+  attr_reader :root, :things_auth_token, :claude_config
 
   def self.from_env
     root = Pathname(__FILE__).dirname.parent.expand_path
     env_file = root / ".env"
     LoadsEnv.new(env_file).call
 
-    things_auth_token = ENV.fetch("THINGS_AUTH_TOKEN", "")
-    if things_auth_token.length == 0
-      raise "Missing THINGS_AUTH_TOKEN in #{env_file}"
-    end
+    things_auth_token =
+      ENV.fetch("THAINGS_THINGS_AUTH_TOKEN") do
+        raise "Missing THAINGS_THINGS_AUTH_TOKEN in #{env_file}"
+      end
 
-    new(root: root, things_auth_token: things_auth_token)
+    new(
+      root: root,
+      things_auth_token: things_auth_token,
+      claude_config: ClaudeConfig.from_env(root: root)
+    )
   end
 
-  def initialize(root:, things_auth_token:)
+  def initialize(root:, things_auth_token:, claude_config:)
     @root = Pathname(root)
     @things_auth_token = things_auth_token
+    @claude_config = claude_config
   end
 
   def to_dos_dir = root / "to-dos"
@@ -48,7 +99,6 @@ class ThaingsConfig
   def daemon_log = log_dir / "daemon.log"
   def receive_log = log_dir / "receive.log"
   def env_file = root / ".env"
-  def instructions_file = root / "to-do-instructions.txt"
 end
 
 # Loads environment variables from a file
@@ -441,15 +491,11 @@ end
 # Asks Claude to respond to a prompt
 #
 class AsksClaude
-  ALLOWED_TOOLS = %w[WebSearch WebFetch].freeze
-  MAX_TURNS = 10
-  TIMEOUT_SECONDS = 300
+  attr_reader :dir, :config
 
-  attr_reader :dir, :instructions_file
-
-  def initialize(dir:, instructions_file:)
+  def initialize(dir:, config:)
     @dir = dir
-    @instructions_file = instructions_file
+    @config = config
   end
 
   def call(prompt)
@@ -457,25 +503,24 @@ class AsksClaude
 
     status.success? ? stdout : "Error: Claude execution failed.\n#{stderr}"
   rescue Timeout::Error
-    "Error: Claude timed out after #{TIMEOUT_SECONDS} seconds."
+    "Error: Claude timed out after #{config.timeout_seconds} seconds."
   end
 
   private
 
   def run(prompt)
-    Timeout.timeout(TIMEOUT_SECONDS) do
+    Timeout.timeout(config.timeout_seconds) do
       stdout, stderr, status =
         Open3.capture3(
-          "/opt/homebrew/bin/claude",
+          config.path,
           "--continue",
-          "--print",
           "--max-turns",
-          MAX_TURNS.to_s,
+          config.max_turns.to_s,
           "--append-system-prompt-file",
-          instructions_file.to_s,
+          config.system_prompt_file.to_s,
           "--allowedTools",
-          ALLOWED_TOOLS.join(","),
-          "-p",
+          config.allowed_tools,
+          "--print",
           prompt,
           chdir: dir.to_s
         )
@@ -573,13 +618,13 @@ end
 # Entry point: wakes, finds queued to-dos, processes them
 #
 class RespondsToThingsToDo
-  attr_reader :store, :log, :things, :instructions_file
+  attr_reader :store, :log, :things, :claude_config
 
-  def initialize(store:, log:, things:, instructions_file:)
+  def initialize(store:, log:, things:, claude_config:)
     @store = store
     @log = log
     @things = things
-    @instructions_file = instructions_file
+    @claude_config = claude_config
   end
 
   def call
@@ -600,8 +645,7 @@ class RespondsToThingsToDo
       queue = store.find(id)
       next unless queue
 
-      claude =
-        AsksClaude.new(dir: queue.dir, instructions_file: instructions_file)
+      claude = AsksClaude.new(dir: queue.dir, config: claude_config)
 
       begin
         ProcessesQueue.new(

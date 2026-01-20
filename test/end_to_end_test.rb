@@ -37,16 +37,24 @@ module TestHelpers
   def setup
     super
     @test_root = Pathname(Dir.mktmpdir("thaings-test"))
+    system_prompt_file = @test_root / "system-prompt.md"
+    claude_config = ClaudeConfig.new(system_prompt_file: system_prompt_file)
     @config =
-      ThaingsConfig.new(root: @test_root, things_auth_token: "test-token")
+      ThaingsConfig.new(
+        root: @test_root,
+        things_auth_token: "test-token",
+        claude_config: claude_config
+      )
 
     # Create required directories
     @config.queue_dir.mkpath
     @config.to_dos_dir.mkpath
     @config.log_dir.mkpath
 
-    # Create a minimal instructions file
-    @config.instructions_file.write("You are a helpful assistant.")
+    # Create a minimal system prompt file
+    @config.claude_config.system_prompt_file.write(
+      "You are a helpful assistant."
+    )
   end
 
   def teardown
