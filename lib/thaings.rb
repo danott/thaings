@@ -476,7 +476,7 @@ class AsksClaude
           "--continue",
           "--max-turns",
           config.max_turns.to_s,
-          "--append-system-prompt-file",
+          "--system-prompt-file",
           config.system_prompt_file.to_s,
           "--allowedTools",
           config.allowed_tools,
