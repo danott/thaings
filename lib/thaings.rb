@@ -14,7 +14,7 @@ class ClaudeConfig
   DEFAULT_MAX_TURNS = 10
   DEFAULT_TIMEOUT_SECONDS = 300
   DEFAULT_ALLOWED_TOOLS = "WebSearch,WebFetch"
-  DEFAULT_PATH = "/opt/homebrew/bin/claude"
+  DEFAULT_PATH = `which claude`.chomp
 
   attr_reader :system_prompt_file,
               :max_turns,

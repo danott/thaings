@@ -7,7 +7,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/bin:/usr/bin</string>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     </dict>
     <key>ProgramArguments</key>
     <array>

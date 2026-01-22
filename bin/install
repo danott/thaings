@@ -93,7 +93,10 @@ def install
   # Generate plist from template
   puts "Generating LaunchAgent plist..."
   plist_content =
-    PLIST_TEMPLATE.read.gsub("__THAINGS_ROOT__", THAINGS_ROOT.to_s)
+    PLIST_TEMPLATE.read.gsub("__THAINGS_ROOT__", THAINGS_ROOT.to_s).gsub(
+      "__HOME__",
+      HOME_DIR.to_s
+    )
   PLIST_GENERATED.write(plist_content)
 
   # Load daemon
