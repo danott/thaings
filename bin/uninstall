@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "pathname"
+
+# Removes Thaings: unloads daemon, removes LaunchAgent symlink
+#
+# Usage:
+#   ./bin/uninstall
+#
+
+HOME_DIR = Pathname(Dir.home)
+THAINGS_ROOT = Pathname(__FILE__).dirname.parent.expand_path
+PLIST_DEST = HOME_DIR / "Library" / "LaunchAgents" / "com.thaings.daemon.plist"
+
+def uninstall
+  puts "Uninstalling Thaings..."
+
+  # Unload daemon
+  puts "Unloading daemon..."
+  system("launchctl", "unload", PLIST_DEST.to_s, err: File::NULL)
+
+  # Remove LaunchAgent symlink
+  if PLIST_DEST.exist? || PLIST_DEST.symlink?
+    PLIST_DEST.delete
+    puts "Removed LaunchAgent"
+  else
+    puts "LaunchAgent not found, skipping"
+  end
+
+  puts <<~DONE
+    Done. Remaining manual steps:
+      1. Delete the Thaings shortcut in the Shortcuts app
+      2. Delete the Working and Ready tags in Things (optional)
+      3. Remove this directory if you no longer need it: #{THAINGS_ROOT}
+  DONE
+end
+
+uninstall
