@@ -1,6 +1,12 @@
 # Thaings
 
+> **Archived.** This project is no longer maintained. The code is here for reference.
+
 Thaings adds agentic workers to to-dos in Things. It's *AI* augmenting *Things*. *Thaings*. You get it.
+
+## Status
+
+This was a fun experiment. I'm no longer using it, but I might pick it up again in the future.
 
 ## How it works
 
